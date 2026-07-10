@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/*
+ * ClearView design tokens — carried over from the v1 aesthetic.
+ * Light theme is the primary experience.
+ */
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f2f4f7;
+  --surface-3: #eaecf1;
+  --border: rgba(0, 0, 0, 0.07);
+  --border-2: rgba(0, 0, 0, 0.12);
+  --text: #111318;
+  --text-2: #5a6070;
+  --text-3: #9aa0b0;
+  --accent: #185fa5;
+  --accent-dim: rgba(24, 95, 165, 0.1);
+  --green: #3b6d11;
+  --green-bg: #eaf3de;
+  --green-bdr: #c0dd97;
+  --red: #a32d2d;
+  --red-bg: #fcebeb;
+  --red-bdr: #f7c1c1;
+  --amber: #ba7517;
+  --amber-bg: #faeeda;
+  --amber-bdr: #fac775;
+  --teal: #0f6e56;
+  --teal-bg: #e1f5ee;
+  --shadow-card: 0 1px 4px rgba(0, 0, 0, 0.06), 0 4px 16px rgba(0, 0, 0, 0.04);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-2: var(--border-2);
+  --color-ink: var(--text);
+  --color-ink-2: var(--text-2);
+  --color-ink-3: var(--text-3);
+  --color-accent: var(--accent);
+  --color-accent-dim: var(--accent-dim);
+  --color-pos: var(--green);
+  --color-pos-bg: var(--green-bg);
+  --color-pos-bdr: var(--green-bdr);
+  --color-neg: var(--red);
+  --color-neg-bg: var(--red-bg);
+  --color-neg-bdr: var(--red-bdr);
+  --color-warn: var(--amber);
+  --color-warn-bg: var(--amber-bg);
+  --color-warn-bdr: var(--amber-bdr);
+  --color-teal: var(--teal);
+  --color-teal-bg: var(--teal-bg);
+
+  --font-sans: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-dm-mono), ui-monospace, monospace;
+
+  --radius-card: 12px;
+  --radius-el: 8px;
+
+  --shadow-card: var(--shadow-card);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-dm-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 4px;
+}
