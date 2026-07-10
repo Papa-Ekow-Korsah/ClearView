@@ -5,11 +5,11 @@ import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/token";
  * Page-level gating. Logged-out visitors can read /about, /history and
  * /analysis/[ticker]; everything that spends API quota or mutates state
  * requires the owner session. API routes enforce auth themselves — this
- * middleware only handles page redirects.
+ * proxy only handles page redirects.
  */
 const PROTECTED_PAGES = ["/watchlist"];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const authed = await verifySessionToken(
