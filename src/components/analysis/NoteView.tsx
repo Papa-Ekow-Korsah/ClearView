@@ -166,7 +166,7 @@ export function NoteView({ note }: { note: ResearchNote }) {
                     EV/EBITDA
                   </th>
                   <th className="text-right font-medium px-4 py-2.5">
-                    Net debt/EBITDA
+                    Debt/equity
                   </th>
                 </tr>
               </thead>
@@ -261,7 +261,7 @@ function PeerTableRow({ row }: { row: PeerRow }) {
         {fmt(row.evEbitdaTTM, { suffix: "x" })}
       </td>
       <td className="text-right font-mono px-4 py-2.5">
-        {fmt(row.netDebtToEbitda, { suffix: "x" })}
+        {fmt(row.debtToEquity, { suffix: "x" })}
       </td>
     </tr>
   );

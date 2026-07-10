@@ -41,8 +41,8 @@ function buildPrompt(input: NoteInput): string {
         )} | opMargin ${fmtNum(p.operatingMarginTTM, "%")} | P/E ${fmtNum(
           p.peTTM,
           "x"
-        )} | EV/EBITDA ${fmtNum(p.evEbitdaTTM, "x")} | netDebt/EBITDA ${fmtNum(
-          p.netDebtToEbitda,
+        )} | EV/EBITDA ${fmtNum(p.evEbitdaTTM, "x")} | debt/equity ${fmtNum(
+          p.debtToEquity,
           "x"
         )}`
     )
@@ -66,7 +66,7 @@ function buildPrompt(input: NoteInput): string {
         "operatingMarginTTM",
         "netProfitMarginTTM",
         "roeTTM",
-        "netDebt/ebitdaTTM",
+        "totalDebt/totalEquityQuarterly",
         "currentRatioQuarterly",
         "epsGrowthTTMYoy",
         "52WeekHigh",
@@ -94,7 +94,34 @@ ${peerTable}
 Recent news headlines (last 30 days):
 ${headlines || "none available"}
 
-Ground every claim in the data above or in well-known public facts about the company. Where the data is missing or ambiguous, say so rather than inventing figures. Time-bound catalysts as specifically as the information allows.`;
+Ground every claim in the data above or in well-known public facts about the company. Where the data is missing or ambiguous, say so rather than inventing figures. Time-bound catalysts as specifically as the information allows. Write plain prose only — no JSON syntax, braces, or markup inside any field.`;
+}
+
+/**
+ * Constrained decoding guarantees valid JSON, but the model can still leak
+ * JSON-ish noise *inside* a string (observed: prose ending in `"} }} }}}`).
+ * Strip a trailing run of quotes/braces/whitespace iff it contains a brace.
+ */
+function stripJsonNoise(s: string): string {
+  const m = s.match(/[\s"'‘’“”{}[\]]+$/);
+  if (m && /[{}]/.test(m[0])) return s.slice(0, -m[0].length).trimEnd();
+  return s;
+}
+
+function sanitizeNote(note: AiNote): AiNote {
+  return {
+    thesis: stripJsonNoise(note.thesis),
+    peerCommentary: stripJsonNoise(note.peerCommentary),
+    catalysts: note.catalysts.map((c) => ({
+      title: stripJsonNoise(c.title),
+      timeframe: stripJsonNoise(c.timeframe),
+      description: stripJsonNoise(c.description),
+    })),
+    risks: note.risks.map((r) => ({
+      title: stripJsonNoise(r.title),
+      description: stripJsonNoise(r.description),
+    })),
+  };
 }
 
 /** Generate the narrative sections of a research note via structured output. */
@@ -126,7 +153,7 @@ export async function generateAiNote(input: NoteInput): Promise<AiNote> {
         "The model response did not match the expected format. Try again."
       );
     }
-    return response.parsed_output;
+    return sanitizeNote(response.parsed_output);
   } catch (err) {
     if (err instanceof AnalysisGenerationError) throw err;
     if (err instanceof Anthropic.AuthenticationError) {

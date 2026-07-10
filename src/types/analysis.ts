@@ -57,7 +57,8 @@ export interface PeerRow {
   operatingMarginTTM: number | null; // %
   peTTM: number | null;
   evEbitdaTTM: number | null;
-  netDebtToEbitda: number | null;
+  /** Total debt / total equity, quarterly. (Net debt/EBITDA isn't on Finnhub's free tier.) */
+  debtToEquity: number | null;
   isSubject: boolean; // true for the analyzed company's own row
 }
 

@@ -51,8 +51,8 @@ export function buildPeerRow(
     grossMarginTTM: num(metrics, "grossMarginTTM"),
     operatingMarginTTM: num(metrics, "operatingMarginTTM"),
     peTTM: num(metrics, "peTTM"),
-    evEbitdaTTM: num(metrics, "enterpriseValue/ebitdaTTM"),
-    netDebtToEbitda: num(metrics, "netDebt/ebitdaTTM"),
+    evEbitdaTTM: num(metrics, "evEbitdaTTM"),
+    debtToEquity: num(metrics, "totalDebt/totalEquityQuarterly"),
     isSubject,
   };
 }
