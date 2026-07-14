@@ -2,7 +2,7 @@
 
 A personal equity research tool. Enter a ticker; get a structured research note — investment thesis, time-bounded catalysts, honest risks, and a peer comparables table — built from real market data with AI-written narrative.
 
-Live app: _(added after deploy)_
+Live app: **[clear-view-seven.vercel.app](https://clear-view-seven.vercel.app)**
 
 ## How it works
 
