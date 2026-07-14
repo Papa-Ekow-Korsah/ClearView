@@ -12,9 +12,13 @@ const STEPS = [
   "Writing the research note…",
 ];
 
-export function TickerSearch() {
+export function TickerSearch({
+  initialTicker = "",
+}: {
+  initialTicker?: string;
+}) {
   const router = useRouter();
-  const [ticker, setTicker] = useState("");
+  const [ticker, setTicker] = useState(initialTicker);
   const [loading, setLoading] = useState(false);
   const [step, setStep] = useState(0);
   const [error, setError] = useState<string | null>(null);

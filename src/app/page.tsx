@@ -1,6 +1,11 @@
 import { TickerSearch } from "@/components/analysis/TickerSearch";
 
-export default function ResearchHome() {
+export default async function ResearchHome({
+  searchParams,
+}: {
+  searchParams: Promise<{ ticker?: string }>;
+}) {
+  const { ticker } = await searchParams;
   return (
     <main className="flex-1 flex flex-col items-center justify-center px-6 py-10">
       <p className="text-[11px] font-medium tracking-[0.1em] uppercase text-ink-3 mb-4">
@@ -15,7 +20,7 @@ export default function ResearchHome() {
         Thesis, catalysts, risks, and peer comparables — real fundamentals from
         Finnhub, narrative written by Claude.
       </p>
-      <TickerSearch />
+      <TickerSearch initialTicker={ticker ?? ""} />
     </main>
   );
 }
