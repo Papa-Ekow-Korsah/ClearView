@@ -58,6 +58,9 @@ export function WatchlistView() {
   }, []);
 
   useEffect(() => {
+    // Initial fetch on mount — state updates happen after await, not
+    // synchronously; this is the external-system sync case the rule allows.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadList().then(pollQuotes);
     pollRef.current = setInterval(pollQuotes, POLL_MS);
     return () => {

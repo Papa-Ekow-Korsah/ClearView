@@ -102,7 +102,7 @@ Ground every claim in the data above or in well-known public facts about the com
  * JSON-ish noise *inside* a string (observed: prose ending in `"} }} }}}`).
  * Strip a trailing run of quotes/braces/whitespace iff it contains a brace.
  */
-function stripJsonNoise(s: string): string {
+export function stripJsonNoise(s: string): string {
   const m = s.match(/[\s"'‘’“”{}[\]]+$/);
   if (m && /[{}]/.test(m[0])) return s.slice(0, -m[0].length).trimEnd();
   return s;

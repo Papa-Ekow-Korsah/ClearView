@@ -1,36 +1,82 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ClearView
 
-## Getting Started
+A personal equity research tool. Enter a ticker; get a structured research note — investment thesis, time-bounded catalysts, honest risks, and a peer comparables table — built from real market data with AI-written narrative.
 
-First, run the development server:
+Live app: _(added after deploy)_
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## How it works
+
+The division of labour is the core design decision:
+
+- **Finnhub** provides every number: quotes, fundamentals, peer lists, metrics, news.
+- **Claude** (via structured outputs) writes only narrative — thesis, catalysts, risks, peer commentary. It reads the numbers; it never produces them, so it can't hallucinate a P/E.
+- **Postgres (Neon)** snapshots every generated note in full, so reopening old research never re-spends an API call, plus the watchlist and rate-limit counters.
+
+Public visitors can read the research archive (`/history`, `/analysis/[id]`) and the About page. Generating analyses and editing the watchlist require the owner login. All third-party API keys live server-side only.
+
+## Stack
+
+- Next.js 16 (App Router) + TypeScript + Tailwind CSS 4
+- Neon Postgres + Drizzle ORM
+- Anthropic SDK (structured outputs; model configurable via env)
+- Auth: single-user bcrypt password + signed httpOnly JWT cookie (jose)
+- Vitest
+
+## Local setup
+
+Prereqs: Node 20+ and a git clone of this repo.
+
+```sh
+npm install
+cp .env.example .env.local
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Fill in `.env.local`:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Where to get it |
+|---|---|
+| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
+| `ANTHROPIC_MODEL` | Optional; defaults to `claude-sonnet-5` |
+| `FINNHUB_API_KEY` | [finnhub.io](https://finnhub.io/dashboard) — free tier |
+| `DATABASE_URL` | [neon.tech](https://neon.tech) — create a free project, copy the connection string |
+| `APP_PASSWORD_HASH` | `node -e "console.log(require('bcryptjs').hashSync('your-password', 12))"` — **escape every `$` as `\$` and quote the value** (Next.js expands `$VAR` in env files and silently mangles the hash otherwise) |
+| `SESSION_SECRET` | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Create the tables, then run:
 
-## Learn More
+```sh
+npx drizzle-kit push
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open http://localhost:3000 — you'll land on the public history page; sign in from the nav to generate research.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Tests & checks
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```sh
+npm test            # vitest: peer selection, sanitizer, API validation
+npm run typecheck   # tsc --noEmit
+npm run lint
+```
 
-## Deploy on Vercel
+## Deploying to Vercel (from scratch)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+1. **Push to GitHub**: create an empty repo on github.com, then
+   `git remote add origin <repo-url> && git push -u origin main`.
+2. **Create a Vercel account** at [vercel.com/signup](https://vercel.com/signup) — sign up with GitHub so repo import is one click.
+3. **Import the project**: Vercel dashboard → *Add New → Project* → select the repo. Framework preset auto-detects Next.js; no build settings to change.
+4. **Add environment variables** on the import screen (or later under *Settings → Environment Variables*): all six from the table above. Paste the bcrypt hash **without** the `\$` escaping here — Vercel's env UI stores values verbatim; the escaping is only needed in `.env` files.
+5. **Deploy.** First build takes a couple of minutes.
+6. **Point the DB at production**: no change needed — the same Neon `DATABASE_URL` works locally and in prod. (Alternatively use Vercel's Neon integration under *Storage* and it will inject `DATABASE_URL` for you.)
+7. Custom domain (optional): *Settings → Domains*.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Operational notes
+
+- **Rate limit**: analysis generation is capped at 10/hour (DB-backed, survives serverless cold starts). Change in `src/lib/rate-limit.ts`.
+- **Watchlist**: capped at 20 tickers; prices poll every 45s only while the tab is visible; 5-day sparklines come from Yahoo's chart API (Finnhub candles are paid-tier).
+- **Model**: swap `ANTHROPIC_MODEL` any time; nothing else references a model name.
+- **Password rotation**: regenerate the hash (command above), update the env var, redeploy. Sessions sign out after 30 days or when `SESSION_SECRET` changes.
+
+## Disclaimer
+
+Personal research tool. AI-assisted synthesis of public data — not investment advice.
