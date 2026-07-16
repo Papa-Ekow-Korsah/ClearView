@@ -7,16 +7,20 @@ import {
   getMetrics,
   getPeerSymbols,
   getRecentNews,
+  getEarningsSurprises,
   isUnknownTicker,
   FinnhubError,
 } from "@/lib/finnhub";
 import { selectPeers, buildPeerRow, orderRows } from "@/lib/peers";
-import { generateAiNote, AnalysisGenerationError } from "@/lib/anthropic";
+import { buildRatioValues } from "@/lib/ratios";
+import { AnalysisGenerationError } from "@/lib/anthropic";
+import { generateAiNoteV2 } from "@/lib/anthropic-v2";
 import { db } from "@/lib/db/client";
 import { analyses } from "@/lib/db/schema";
-import type { PeerRow, ResearchNote, Snapshot } from "@/types/analysis";
+import type { PeerRow, Snapshot } from "@/types/analysis";
+import type { ResearchNoteV2 } from "@/types/analysis-v2";
 
-export const maxDuration = 120; // AI generation can take a while
+export const maxDuration = 300; // six-section generation takes 1-3 minutes
 
 const TICKER_RE = /^[A-Z]{1,6}$/;
 
@@ -60,17 +64,21 @@ export async function POST(request: NextRequest) {
 
   try {
     // 1. Subject company data (parallel)
-    const [profile, quote, metricsRes, peerSymbols, news] = await Promise.all([
-      getProfile(ticker),
-      getQuote(ticker),
-      getMetrics(ticker),
-      getPeerSymbols(ticker),
-      getRecentNews(ticker),
-    ]);
+    const [profile, quote, metricsRes, peerSymbols, news, epsSurprises] =
+      await Promise.all([
+        getProfile(ticker),
+        getQuote(ticker),
+        getMetrics(ticker),
+        getPeerSymbols(ticker),
+        getRecentNews(ticker),
+        getEarningsSurprises(ticker).catch(() => []),
+      ]);
 
     if (isUnknownTicker(profile)) {
       return NextResponse.json(
-        { error: `Finnhub doesn't recognise "${ticker}". Check the symbol — US listings work best on the free tier.` },
+        {
+          error: `Finnhub doesn't recognise "${ticker}". Check the symbol — US listings work best on the free tier.`,
+        },
         { status: 404 }
       );
     }
@@ -88,25 +96,30 @@ export async function POST(request: NextRequest) {
 
     // 2. Peer data (parallel per peer; tolerate individual failures)
     const peerTickers = selectPeers(ticker, peerSymbols);
-    const peerRows = await Promise.all(
-      peerTickers.map(async (pt): Promise<PeerRow | null> => {
+    const peerData = await Promise.all(
+      peerTickers.map(async (pt) => {
         try {
           const [pProfile, pMetrics] = await Promise.all([
             getProfile(pt),
             getMetrics(pt),
           ]);
           if (isUnknownTicker(pProfile)) return null;
-          return buildPeerRow(
-            pt,
-            pProfile.name ?? pt,
-            pMetrics.metric,
-            pProfile.marketCapitalization ?? null
-          );
+          return {
+            ticker: pt,
+            metrics: pMetrics.metric,
+            row: buildPeerRow(
+              pt,
+              pProfile.name ?? pt,
+              pMetrics.metric,
+              pProfile.marketCapitalization ?? null
+            ),
+          };
         } catch {
-          return null; // a missing peer shouldn't sink the analysis
+          return null;
         }
       })
     );
+    const livePeers = peerData.filter((p): p is NonNullable<typeof p> => p !== null);
 
     const subjectRow = buildPeerRow(
       ticker,
@@ -115,38 +128,56 @@ export async function POST(request: NextRequest) {
       profile.marketCapitalization ?? null,
       true
     );
-    const peers = orderRows([
-      subjectRow,
-      ...peerRows.filter((r): r is PeerRow => r !== null),
-    ]);
+    const peers: PeerRow[] = orderRows([subjectRow, ...livePeers.map((p) => p.row)]);
 
-    // 3. AI narrative (thesis, catalysts, risks, peer commentary)
-    const ai = await generateAiNote({
+    // 3. Verified ratio values (subject + peers) for the Ratios tab
+    const ratioValues = buildRatioValues(
+      metricsRes.metric,
+      livePeers.map((p) => ({ ticker: p.ticker, metrics: p.metrics }))
+    );
+
+    // 4. AI six-section note (both voices)
+    const ai = await generateAiNoteV2({
       ticker,
       companyName: profile.name ?? ticker,
       industry: profile.finnhubIndustry ?? null,
       snapshot,
       subjectMetrics: metricsRes.metric,
       peers,
+      ratioValues,
+      epsSurprises: (epsSurprises ?? []).slice(0, 4).map((e) => ({
+        period: e.period,
+        actual: e.actual,
+        estimate: e.estimate,
+        surprisePercent: e.surprisePercent,
+      })),
       news,
     });
 
-    const note: ResearchNote = {
+    const note: ResearchNoteV2 = {
+      formatVersion: 2,
       ticker,
       companyName: profile.name ?? ticker,
       generatedAt: new Date().toISOString(),
       model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
       snapshot,
-      ai,
       peers,
-      newsHeadlines: news.slice(0, 8).map((n) => ({
-        headline: n.headline,
-        date: new Date(n.datetime * 1000).toISOString().slice(0, 10),
-        source: n.source,
+      ratioValues,
+      epsSurprises: (epsSurprises ?? []).slice(0, 4).map((e) => ({
+        period: e.period,
+        actual: e.actual,
+        estimate: e.estimate,
+        surprisePercent: e.surprisePercent,
       })),
+      newsHeadlines: news.slice(0, 8).map((item) => ({
+        headline: item.headline,
+        date: new Date(item.datetime * 1000).toISOString().slice(0, 10),
+        source: item.source,
+      })),
+      ai,
     };
 
-    // 4. Persist to history
+    // 5. Persist to history
     const [saved] = await db()
       .insert(analyses)
       .values({ ticker, companyName: note.companyName, note })

@@ -8,8 +8,10 @@ const QUICK_TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "INTC"];
 const STEPS = [
   "Pulling fundamentals from Finnhub…",
   "Selecting peer comparables…",
-  "Fetching recent news…",
-  "Writing the research note…",
+  "Fetching recent news and earnings history…",
+  "Writing the six-section research note…",
+  "Writing both voices (Explain + Analyst)…",
+  "Assembling verdict and scorecard…",
 ];
 
 export function TickerSearch({
@@ -73,7 +75,7 @@ export function TickerSearch({
         <div className="w-9 h-9 rounded-full border-[2.5px] border-surface-3 border-t-accent animate-spin mx-auto mb-4" />
         <p className="text-sm text-ink-2 mb-1.5">{STEPS[step]}</p>
         <p className="text-xs text-ink-3">
-          Running deep analysis on {ticker.toUpperCase()} — usually 30–60 seconds
+          Running deep analysis on {ticker.toUpperCase()} — usually 1–3 minutes
         </p>
       </div>
     );

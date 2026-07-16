@@ -120,6 +120,23 @@ export function getPeerSymbols(ticker: string): Promise<string[]> {
   );
 }
 
+export interface EarningsSurprise {
+  period: string;
+  actual: number | null;
+  estimate: number | null;
+  surprisePercent: number | null;
+}
+
+/** Last 4 quarters of EPS actual vs estimate — verified beat/miss history. */
+export function getEarningsSurprises(
+  ticker: string
+): Promise<EarningsSurprise[]> {
+  return get<EarningsSurprise[]>(
+    `/stock/earnings?symbol=${encodeURIComponent(ticker)}`,
+    60 * MIN
+  );
+}
+
 export async function getRecentNews(ticker: string): Promise<NewsItem[]> {
   const to = new Date();
   const from = new Date(to.getTime() - 30 * 24 * 3600 * 1000);
