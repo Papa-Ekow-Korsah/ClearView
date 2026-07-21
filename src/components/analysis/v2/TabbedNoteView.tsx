@@ -7,6 +7,7 @@ import type {
   RatioKey,
   ResearchNoteV2,
 } from "@/types/analysis-v2";
+import { useLiveQuote, type LiveData } from "@/components/analysis/v2/useLiveQuote";
 
 type Mode = "explain" | "analyst";
 type TabId = "overview" | "earnings" | "ratios" | "deals" | "macro" | "verdict";
@@ -114,7 +115,10 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
   const [mode, setMode] = useState<Mode>("explain");
   const { ai, snapshot } = note;
   const sig = SIGNAL_STYLE[ai.signal];
-  const dayPos = (snapshot.dayChangePct ?? 0) >= 0;
+  const live = useLiveQuote(note.ticker);
+  const price = live?.price ?? snapshot.price;
+  const changePct = live?.changePct ?? snapshot.dayChangePct;
+  const dayPos = (changePct ?? 0) >= 0;
 
   return (
     <div className="flex-1 flex flex-col">
@@ -135,12 +139,24 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
             <div className="flex items-start gap-5">
               <div className="text-right">
                 <p className="text-3xl font-semibold font-mono tracking-tight leading-none">
-                  {snapshot.price !== null ? `$${snapshot.price.toFixed(2)}` : "—"}
+                  {price !== null ? `$${price.toFixed(2)}` : "—"}
                 </p>
                 <p className={`text-xs mt-1 font-medium ${dayPos ? "text-pos" : "text-neg"}`}>
-                  {snapshot.dayChangePct !== null
-                    ? `${dayPos ? "+" : ""}${snapshot.dayChangePct.toFixed(2)}% today`
+                  {changePct !== null
+                    ? `${dayPos ? "+" : ""}${changePct.toFixed(2)}% today`
                     : ""}
+                </p>
+                <p className="text-[10px] mt-1 flex items-center justify-end gap-1.5">
+                  {live ? (
+                    <>
+                      <span className="w-[7px] h-[7px] rounded-full bg-pos animate-pulse" />
+                      <span className="text-pos font-medium">Live</span>
+                    </>
+                  ) : (
+                    <span className="text-ink-3">
+                      as of {new Date(note.generatedAt).toLocaleDateString("en-GB", { day: "2-digit", month: "short" })}
+                    </span>
+                  )}
                 </p>
               </div>
               <ModeToggle mode={mode} setMode={setMode} />
@@ -181,7 +197,7 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
         <div className="max-w-5xl mx-auto w-full">
           {tab === "overview" && <OverviewTab note={note} mode={mode} />}
           {tab === "earnings" && <EarningsTab note={note} mode={mode} />}
-          {tab === "ratios" && <RatiosTab note={note} mode={mode} />}
+          {tab === "ratios" && <RatiosTab note={note} mode={mode} live={live} />}
           {tab === "deals" && <DealsTab note={note} mode={mode} />}
           {tab === "macro" && <MacroTab note={note} mode={mode} />}
           {tab === "verdict" && <VerdictTab note={note} mode={mode} />}
@@ -490,16 +506,35 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
 
 // ── Ratios ───────────────────────────────────────────────────────
 
-function RatiosTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
+function RatiosTab({
+  note,
+  mode,
+  live,
+}: {
+  note: ResearchNoteV2;
+  mode: Mode;
+  live: LiveData | null;
+}) {
   const byKey = new Map(note.ratioValues.map((r) => [r.key, r]));
   return (
     <div>
       <SectionLabel>
-        Financial ratios — values <span className="normal-case tracking-normal"><VerifiedTag /></span>
+        Financial ratios — {live ? "live values" : "values"}{" "}
+        <span className="normal-case tracking-normal"><VerifiedTag /></span>
         , interpretation by AI
       </SectionLabel>
       {note.ai.ratios.map((r) => {
         const rv = byKey.get(r.key);
+        const storedValue = rv?.value ?? null;
+        const liveValue = live?.ratios?.[r.key];
+        const value = liveValue ?? storedValue;
+        // Flag when the live value has moved >10% since the AI wrote its
+        // interpretation of the stored value.
+        const drifted =
+          liveValue != null &&
+          storedValue != null &&
+          storedValue !== 0 &&
+          Math.abs(liveValue - storedValue) / Math.abs(storedValue) > 0.1;
         const tone = TONE[r.verdict];
         return (
           <div key={r.key} className="bg-surface border border-line rounded-card mb-2.5 overflow-hidden">
@@ -509,9 +544,17 @@ function RatiosTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
                 <p className="text-[11px] text-ink-3 mt-0.5">{pick(r.peerNote, mode)}</p>
               </div>
               <div className="flex items-center gap-2.5">
-                <span className={`text-xl font-semibold font-mono ${tone.text}`}>
-                  {rv?.value != null ? `${rv.value.toFixed(1)}${RATIO_SUFFIX[r.key]}` : "—"}
-                </span>
+                <div className="text-right">
+                  <span className={`text-xl font-semibold font-mono ${tone.text}`}>
+                    {value != null ? `${value.toFixed(1)}${RATIO_SUFFIX[r.key]}` : "—"}
+                  </span>
+                  {drifted && (
+                    <p className="text-[10px] text-warn leading-tight">
+                      was {storedValue!.toFixed(1)}
+                      {RATIO_SUFFIX[r.key]} when analysed
+                    </p>
+                  )}
+                </div>
                 <span className={`text-[10px] font-semibold px-2 py-1 rounded ${tone.bg} ${tone.text}`}>
                   {r.verdictLabel}
                 </span>
