@@ -319,8 +319,23 @@ function BullBear({ bull, bear }: { bull: string[]; bear: string[] }) {
 
 // ── Earnings ─────────────────────────────────────────────────────
 
+function usd(v: number | null): string {
+  if (v === null) return "—";
+  const abs = Math.abs(v);
+  if (abs >= 1e12) return `$${(v / 1e12).toFixed(2)}T`;
+  if (abs >= 1e9) return `$${(v / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `$${(v / 1e6).toFixed(0)}M`;
+  return `$${v.toFixed(0)}`;
+}
+
+function pct(numerator: number | null, denominator: number | null): number | null {
+  if (numerator === null || denominator === null || denominator === 0) return null;
+  return (numerator / denominator) * 100;
+}
+
 function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
   const e = note.ai.earnings;
+  const sec = note.secFinancials ?? null;
   const latestEps = note.epsSurprises[0];
   const beat = (latestEps?.surprisePercent ?? 0) >= 0;
 
@@ -345,13 +360,22 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
 
       <div className="grid sm:grid-cols-3 gap-2.5 mb-5">
         <div className="bg-surface border border-line rounded-el border-t-2 border-t-accent px-3.5 py-3">
-          <p className="text-[10px] text-ink-3 mb-1 flex items-center gap-1.5">Revenue <AiSourcedTag /></p>
-          <p className="text-xl font-semibold font-mono leading-none mb-1.5">{e.revenue.value}</p>
+          <p className="text-[10px] text-ink-3 mb-1 flex items-center gap-1.5">
+            Revenue {sec?.incomeStatement.revenue != null ? <VerifiedTag /> : <AiSourcedTag />}
+          </p>
+          <p className="text-xl font-semibold font-mono leading-none mb-1.5">
+            {sec?.incomeStatement.revenue != null ? usd(sec.incomeStatement.revenue) : e.revenue.value}
+          </p>
           <p className="text-[10px] text-ink-3">
             Est. {e.revenue.estimate}{" "}
             <span className="text-pos font-semibold">{e.revenue.beat}</span>
           </p>
-          <p className="text-[10px] text-pos mt-0.5">{e.revenue.yoy} YoY</p>
+          <p className="text-[10px] text-pos mt-0.5">
+            {sec?.incomeStatement.revenueYoYPct != null
+              ? `${sec.incomeStatement.revenueYoYPct >= 0 ? "+" : ""}${sec.incomeStatement.revenueYoYPct.toFixed(1)}%`
+              : e.revenue.yoy}{" "}
+            YoY
+          </p>
         </div>
         {note.epsSurprises.slice(0, 2).map((s, i) => {
           const b = (s.surprisePercent ?? 0) >= 0;
@@ -399,70 +423,178 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
             </div>
           ))}
         </Panel>
-        <Panel title="Margins" tag={<AiSourcedTag />}>
-          {e.margins.map((m, i) => (
-            <div key={i} className="py-2 border-b border-line last:border-b-0">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-[11px] text-ink-2">{m.name}</span>
-                <span className={`text-xs font-semibold font-mono ${TONE[m.tone].text}`}>{m.value}</span>
+        {sec?.incomeStatement.revenue != null ? (
+          <Panel title={`Margins — ${sec.fiscalPeriod}`} tag={<VerifiedTag />}>
+            {(
+              [
+                ["Gross margin", pct(sec.incomeStatement.grossProfit, sec.incomeStatement.revenue)],
+                ["Operating margin", pct(sec.incomeStatement.operatingIncome, sec.incomeStatement.revenue)],
+                ["Net margin", pct(sec.incomeStatement.netIncome, sec.incomeStatement.revenue)],
+                ["FCF margin", pct(sec.cashFlow.freeCashFlow, sec.incomeStatement.revenue)],
+              ] as const
+            )
+              .filter(([, v]) => v !== null)
+              .map(([name, v], i) => (
+                <div key={i} className="py-2 border-b border-line last:border-b-0">
+                  <div className="flex justify-between items-center mb-1">
+                    <span className="text-[11px] text-ink-2">{name}</span>
+                    <span className={`text-xs font-semibold font-mono ${v! >= 0 ? "text-pos" : "text-neg"}`}>
+                      {v!.toFixed(1)}%
+                    </span>
+                  </div>
+                  <div className="h-[3px] bg-surface-2 rounded-full overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${Math.min(100, Math.max(3, Math.abs(v!)))}%`,
+                        background: v! >= 0 ? "var(--green)" : "var(--red)",
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+          </Panel>
+        ) : (
+          <Panel title="Margins" tag={<AiSourcedTag />}>
+            {e.margins.map((m, i) => (
+              <div key={i} className="py-2 border-b border-line last:border-b-0">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[11px] text-ink-2">{m.name}</span>
+                  <span className={`text-xs font-semibold font-mono ${TONE[m.tone].text}`}>{m.value}</span>
+                </div>
+                <div className="h-[3px] bg-surface-2 rounded-full overflow-hidden">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${Math.min(100, Math.max(3, m.barPct))}%`,
+                      background: TONE[m.tone].solid,
+                    }}
+                  />
+                </div>
+                <p className="text-[10px] text-ink-3 mt-1">{m.yoyNote}</p>
               </div>
-              <div className="h-[3px] bg-surface-2 rounded-full overflow-hidden">
-                <div
-                  className="h-full rounded-full"
-                  style={{
-                    width: `${Math.min(100, Math.max(3, m.barPct))}%`,
-                    background: TONE[m.tone].solid,
-                  }}
-                />
-              </div>
-              <p className="text-[10px] text-ink-3 mt-1">{m.yoyNote}</p>
-            </div>
-          ))}
-        </Panel>
+            ))}
+          </Panel>
+        )}
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3 mb-5">
-        <Panel title="Balance sheet" tag={<AiSourcedTag />}>
-          {(
-            [
-              ["Cash & equivalents", e.balanceSheet.cash, "bg-pos"],
-              ["Total assets", e.balanceSheet.totalAssets, "bg-accent"],
-              ["Total liabilities", e.balanceSheet.totalLiabilities, "bg-neg"],
-              ["Shareholders' equity", e.balanceSheet.equity, "bg-pos"],
-              ["Long-term debt", e.balanceSheet.longTermDebt, "bg-warn"],
-            ] as const
-          ).map(([label, value, dot], i) => (
-            <div key={i} className="flex items-center justify-between py-2 border-b border-line last:border-b-0">
-              <span className="flex items-center gap-2 text-[11px] text-ink-2">
-                <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
-                {label}
-              </span>
-              <span className="text-xs font-semibold font-mono">{value}</span>
-            </div>
-          ))}
-          <div className="flex items-center justify-between bg-warn-bg border border-warn-bdr rounded-el px-3 py-2 mt-2.5">
-            <span className="text-[11px] font-medium text-warn">Net debt position</span>
-            <span className="text-sm font-semibold font-mono text-warn">{e.balanceSheet.netDebt}</span>
-          </div>
-          <p className="text-xs text-ink-2 leading-relaxed mt-2.5">{pick(e.balanceSheet.note, mode)}</p>
-        </Panel>
-        <Panel title="Cash flow" tag={<AiSourcedTag />}>
-          {e.cashFlow.map((c, i) => (
-            <div key={i} className="py-2 border-b border-line last:border-b-0">
-              <div className="flex justify-between items-center mb-0.5">
-                <span className="text-[11px] text-ink-2">{c.label}</span>
+        {sec ? (
+          <Panel title={`Balance sheet — ${sec.fiscalPeriod}`} tag={<VerifiedTag />}>
+            {(
+              [
+                ["Cash & equivalents", sec.balanceSheet.cash, "bg-pos"],
+                ["Short-term investments", sec.balanceSheet.shortTermInvestments, "bg-pos"],
+                ["Total assets", sec.balanceSheet.totalAssets, "bg-accent"],
+                ["Total liabilities", sec.balanceSheet.totalLiabilities, "bg-neg"],
+                ["Shareholders' equity", sec.balanceSheet.equity, "bg-pos"],
+                ["Long-term debt", sec.balanceSheet.longTermDebt, "bg-warn"],
+              ] as const
+            )
+              .filter(([, v]) => v !== null)
+              .map(([label, value, dot], i) => (
+                <div key={i} className="flex items-center justify-between py-2 border-b border-line last:border-b-0">
+                  <span className="flex items-center gap-2 text-[11px] text-ink-2">
+                    <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                    {label}
+                  </span>
+                  <span className="text-xs font-semibold font-mono">{usd(value)}</span>
+                </div>
+              ))}
+            {sec.balanceSheet.netDebt !== null && (
+              <div
+                className={`flex items-center justify-between rounded-el px-3 py-2 mt-2.5 border ${
+                  sec.balanceSheet.netDebt <= 0
+                    ? "bg-pos-bg border-pos-bdr"
+                    : "bg-warn-bg border-warn-bdr"
+                }`}
+              >
                 <span
-                  className={`text-xs font-semibold font-mono ${
-                    c.value.startsWith("-") ? "text-neg" : c.value.startsWith("+") ? "text-pos" : ""
-                  }`}
+                  className={`text-[11px] font-medium ${sec.balanceSheet.netDebt <= 0 ? "text-pos" : "text-warn"}`}
                 >
-                  {c.value}
+                  {sec.balanceSheet.netDebt <= 0 ? "Net cash position" : "Net debt position"}
+                </span>
+                <span
+                  className={`text-sm font-semibold font-mono ${sec.balanceSheet.netDebt <= 0 ? "text-pos" : "text-warn"}`}
+                >
+                  {usd(Math.abs(sec.balanceSheet.netDebt))}
                 </span>
               </div>
-              <p className="text-[10px] text-ink-3 leading-relaxed">{pick(c.note, mode)}</p>
+            )}
+            <p className="text-xs text-ink-2 leading-relaxed mt-2.5">{pick(e.balanceSheet.note, mode)}</p>
+          </Panel>
+        ) : (
+          <Panel title="Balance sheet" tag={<AiSourcedTag />}>
+            {(
+              [
+                ["Cash & equivalents", e.balanceSheet.cash, "bg-pos"],
+                ["Total assets", e.balanceSheet.totalAssets, "bg-accent"],
+                ["Total liabilities", e.balanceSheet.totalLiabilities, "bg-neg"],
+                ["Shareholders' equity", e.balanceSheet.equity, "bg-pos"],
+                ["Long-term debt", e.balanceSheet.longTermDebt, "bg-warn"],
+              ] as const
+            ).map(([label, value, dot], i) => (
+              <div key={i} className="flex items-center justify-between py-2 border-b border-line last:border-b-0">
+                <span className="flex items-center gap-2 text-[11px] text-ink-2">
+                  <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                  {label}
+                </span>
+                <span className="text-xs font-semibold font-mono">{value}</span>
+              </div>
+            ))}
+            <div className="flex items-center justify-between bg-warn-bg border border-warn-bdr rounded-el px-3 py-2 mt-2.5">
+              <span className="text-[11px] font-medium text-warn">Net debt position</span>
+              <span className="text-sm font-semibold font-mono text-warn">{e.balanceSheet.netDebt}</span>
             </div>
-          ))}
-        </Panel>
+            <p className="text-xs text-ink-2 leading-relaxed mt-2.5">{pick(e.balanceSheet.note, mode)}</p>
+          </Panel>
+        )}
+        {sec?.cashFlow.operatingCF != null ? (
+          <Panel title={`Cash flow — ${sec.fiscalPeriod}`} tag={<VerifiedTag />}>
+            {(
+              [
+                ["Operating cash flow", sec.cashFlow.operatingCF],
+                ["Capex", sec.cashFlow.capex !== null ? -sec.cashFlow.capex : null],
+                ["Free cash flow", sec.cashFlow.freeCashFlow],
+                ["Buybacks", sec.cashFlow.buybacks !== null ? -sec.cashFlow.buybacks : null],
+                ["Dividends", sec.cashFlow.dividends !== null ? -sec.cashFlow.dividends : null],
+              ] as const
+            )
+              .filter(([, v]) => v !== null)
+              .map(([label, value], i) => (
+                <div key={i} className="flex items-center justify-between py-2 border-b border-line last:border-b-0">
+                  <span className="text-[11px] text-ink-2">{label}</span>
+                  <span
+                    className={`text-xs font-semibold font-mono ${value! >= 0 ? "text-pos" : "text-neg"}`}
+                  >
+                    {value! >= 0 ? "+" : "−"}
+                    {usd(Math.abs(value!))}
+                  </span>
+                </div>
+              ))}
+            <p className="text-[10px] text-ink-3 mt-2.5">
+              Source: {sec.form} filed {sec.filedDate} (SEC, via Finnhub)
+            </p>
+          </Panel>
+        ) : (
+          <Panel title="Cash flow" tag={<AiSourcedTag />}>
+            {e.cashFlow.map((c, i) => (
+              <div key={i} className="py-2 border-b border-line last:border-b-0">
+                <div className="flex justify-between items-center mb-0.5">
+                  <span className="text-[11px] text-ink-2">{c.label}</span>
+                  <span
+                    className={`text-xs font-semibold font-mono ${
+                      c.value.startsWith("-") ? "text-neg" : c.value.startsWith("+") ? "text-pos" : ""
+                    }`}
+                  >
+                    {c.value}
+                  </span>
+                </div>
+                <p className="text-[10px] text-ink-3 leading-relaxed">{pick(c.note, mode)}</p>
+              </div>
+            ))}
+          </Panel>
+        )}
       </div>
 
       <div className="bg-surface border border-line rounded-el p-4 mb-5">

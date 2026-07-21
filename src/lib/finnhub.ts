@@ -120,6 +120,38 @@ export function getPeerSymbols(ticker: string): Promise<string[]> {
   );
 }
 
+export interface ReportedFinancialItem {
+  concept: string;
+  label: string;
+  unit: string;
+  value: number | string;
+}
+
+export interface ReportedFinancials {
+  data: {
+    year: number;
+    quarter: number;
+    form: string;
+    endDate: string;
+    filedDate: string;
+    report: {
+      bs: ReportedFinancialItem[];
+      ic: ReportedFinancialItem[];
+      cf: ReportedFinancialItem[];
+    };
+  }[];
+}
+
+/** As-reported SEC filing data (10-Q/10-K) — free tier, US filers. */
+export function getFinancialsReported(
+  ticker: string
+): Promise<ReportedFinancials> {
+  return get<ReportedFinancials>(
+    `/stock/financials-reported?symbol=${encodeURIComponent(ticker)}&freq=quarterly`,
+    60 * MIN
+  );
+}
+
 export interface EarningsSurprise {
   period: string;
   actual: number | null;

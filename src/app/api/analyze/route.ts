@@ -8,9 +8,11 @@ import {
   getPeerSymbols,
   getRecentNews,
   getEarningsSurprises,
+  getFinancialsReported,
   isUnknownTicker,
   FinnhubError,
 } from "@/lib/finnhub";
+import { extractSecFinancials } from "@/lib/sec";
 import { selectPeers, buildPeerRow, orderRows } from "@/lib/peers";
 import { buildRatioValues } from "@/lib/ratios";
 import { AnalysisGenerationError } from "@/lib/anthropic";
@@ -64,7 +66,7 @@ export async function POST(request: NextRequest) {
 
   try {
     // 1. Subject company data (parallel)
-    const [profile, quote, metricsRes, peerSymbols, news, epsSurprises] =
+    const [profile, quote, metricsRes, peerSymbols, news, epsSurprises, reported] =
       await Promise.all([
         getProfile(ticker),
         getQuote(ticker),
@@ -72,7 +74,11 @@ export async function POST(request: NextRequest) {
         getPeerSymbols(ticker),
         getRecentNews(ticker),
         getEarningsSurprises(ticker).catch(() => []),
+        getFinancialsReported(ticker).catch(() => null),
       ]);
+
+    // SEC filings coverage varies (non-US filers have none) — best-effort.
+    const secFinancials = reported ? extractSecFinancials(reported) : null;
 
     if (isUnknownTicker(profile)) {
       return NextResponse.json(
@@ -151,6 +157,7 @@ export async function POST(request: NextRequest) {
         estimate: e.estimate,
         surprisePercent: e.surprisePercent,
       })),
+      secFinancials,
       news,
     });
 
@@ -169,6 +176,7 @@ export async function POST(request: NextRequest) {
         estimate: e.estimate,
         surprisePercent: e.surprisePercent,
       })),
+      secFinancials,
       newsHeadlines: news.slice(0, 8).map((item) => ({
         headline: item.headline,
         date: new Date(item.datetime * 1000).toISOString().slice(0, 10),

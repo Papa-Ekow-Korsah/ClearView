@@ -18,6 +18,7 @@ import {
 } from "@/types/analysis-v2";
 import type { PeerRow, Snapshot } from "@/types/analysis";
 import type { NewsItem } from "@/lib/finnhub";
+import type { SecFinancials } from "@/lib/sec";
 
 export interface NoteInputV2 {
   ticker: string;
@@ -28,7 +29,35 @@ export interface NoteInputV2 {
   peers: PeerRow[];
   ratioValues: RatioValue[];
   epsSurprises: EpsSurprise[];
+  secFinancials: SecFinancials | null;
   news: NewsItem[];
+}
+
+function usd(v: number | null): string {
+  if (v === null) return "n/a";
+  const abs = Math.abs(v);
+  const fmt =
+    abs >= 1e12
+      ? `$${(v / 1e12).toFixed(2)}T`
+      : abs >= 1e9
+        ? `$${(v / 1e9).toFixed(2)}B`
+        : abs >= 1e6
+          ? `$${(v / 1e6).toFixed(1)}M`
+          : `$${v.toFixed(0)}`;
+  return fmt;
+}
+
+function secBlock(sec: SecFinancials | null): string {
+  if (!sec) {
+    return "As-reported SEC financials: not available for this ticker — use your knowledge for balance sheet/cash flow figures and hedge accordingly.";
+  }
+  const b = sec.balanceSheet;
+  const i = sec.incomeStatement;
+  const c = sec.cashFlow;
+  return `As-reported SEC financials (${sec.form}, ${sec.fiscalPeriod}, period ended ${sec.endDate} — USE THESE EXACT FIGURES for the earnings section; the app renders them as verified next to your narrative):
+Income statement: revenue ${usd(i.revenue)}${i.revenueYoYPct != null ? ` (${i.revenueYoYPct >= 0 ? "+" : ""}${i.revenueYoYPct.toFixed(1)}% YoY)` : ""}, gross profit ${usd(i.grossProfit)}, operating income ${usd(i.operatingIncome)}, net income ${usd(i.netIncome)}, diluted EPS ${i.epsDiluted ?? "n/a"}
+Balance sheet: cash ${usd(b.cash)}, short-term investments ${usd(b.shortTermInvestments)}, total assets ${usd(b.totalAssets)}, total liabilities ${usd(b.totalLiabilities)}, equity ${usd(b.equity)}, short-term debt ${usd(b.shortTermDebt)}, long-term debt ${usd(b.longTermDebt)}, net debt ${usd(b.netDebt)}${b.netDebt !== null && b.netDebt < 0 ? " (net cash)" : ""}
+Cash flow (quarter): operating CF ${usd(c.operatingCF)}, capex ${usd(c.capex)}, free cash flow ${usd(c.freeCashFlow)}, buybacks ${usd(c.buybacks)}, dividends ${usd(c.dividends)}`;
 }
 
 function n(v: number | null, suffix = ""): string {
@@ -87,6 +116,8 @@ ${ratioTable}
 
 EPS actual vs estimate, last quarters:
 ${epsTable || "n/a"}
+
+${secBlock(input.secFinancials)}
 
 Recent news (last 30 days):
 ${headlines || "none"}

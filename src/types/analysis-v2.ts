@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PeerRow, Snapshot } from "@/types/analysis";
+import type { SecFinancials } from "@/lib/sec";
 
 /**
  * V2 rich note format — the six-tab deep dive carried over from ClearView v1
@@ -292,6 +293,8 @@ export interface ResearchNoteV2 {
   peers: PeerRow[];
   ratioValues: RatioValue[];
   epsSurprises: EpsSurprise[];
+  /** As-reported SEC filing figures; null when unavailable (e.g. non-US filers). */
+  secFinancials?: SecFinancials | null;
   newsHeadlines: { headline: string; date: string; source: string }[];
   ai: AiNoteV2;
 }
