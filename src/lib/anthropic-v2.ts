@@ -193,41 +193,83 @@ const SECTION_PROMPTS = {
     "Produce the MACRO section: net macro verdict for this specific company, a net-impact meter position, and 3-4 macro factors each naming the specific transmission channel to this company.",
 } as const;
 
+/** A section that came back truncated/unparseable — worth another attempt. */
+class SectionRetryable extends Error {}
+
+async function generateSectionOnce<S extends z.ZodType>(
+  client: Anthropic,
+  basePrompt: string,
+  sectionPrompt: string,
+  schema: S
+): Promise<z.infer<S>> {
+  let response;
+  try {
+    const stream = client.messages.stream({
+      // Generous budget: the dual-voice earnings section is large, and
+      // streaming means no HTTP timeout to worry about.
+      model: config.anthropicModel,
+      max_tokens: 24000,
+      messages: [
+        { role: "user", content: `${basePrompt}\n\nYOUR TASK:\n${sectionPrompt}` },
+      ],
+      output_config: { format: zodOutputFormat(schema) },
+    });
+    response = await stream.finalMessage();
+  } catch (err) {
+    // The SDK parses the constrained output inside finalMessage() and throws
+    // here if it was truncated into invalid JSON. Real API failures (auth,
+    // rate limit) must propagate; a parse failure is retryable.
+    if (err instanceof Anthropic.APIError) throw err;
+    throw new SectionRetryable(err instanceof Error ? err.message : "parse failure");
+  }
+
+  if (response.stop_reason === "refusal") {
+    throw new AnalysisGenerationError("The model declined to generate this analysis.");
+  }
+  if (response.stop_reason === "max_tokens") {
+    throw new SectionRetryable("truncated at max_tokens");
+  }
+  const text = response.content.find((b) => b.type === "text");
+  if (!text || text.type !== "text") {
+    throw new SectionRetryable("empty response");
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text.text);
+  } catch {
+    throw new SectionRetryable("malformed json");
+  }
+  const parsed = schema.safeParse(json);
+  if (!parsed.success) {
+    throw new SectionRetryable("schema mismatch");
+  }
+  return parsed.data;
+}
+
 async function generateSection<S extends z.ZodType>(
   client: Anthropic,
   basePrompt: string,
   sectionPrompt: string,
   schema: S
 ): Promise<z.infer<S>> {
-  const stream = client.messages.stream({
-    model: config.anthropicModel,
-    max_tokens: 12000,
-    messages: [
-      { role: "user", content: `${basePrompt}\n\nYOUR TASK:\n${sectionPrompt}` },
-    ],
-    output_config: { format: zodOutputFormat(schema) },
-  });
-  const response = await stream.finalMessage();
-
-  if (response.stop_reason === "refusal") {
-    throw new AnalysisGenerationError("The model declined to generate this analysis.");
+  const MAX_ATTEMPTS = 3;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await generateSectionOnce(client, basePrompt, sectionPrompt, schema);
+    } catch (err) {
+      // Retry only truncation/parse failures; auth, refusal, rate limit
+      // propagate immediately to the outer handler.
+      if (err instanceof SectionRetryable && attempt < MAX_ATTEMPTS) continue;
+      if (err instanceof SectionRetryable) {
+        throw new AnalysisGenerationError(
+          "A section of the analysis kept coming back incomplete. Please try again."
+        );
+      }
+      throw err;
+    }
   }
-  if (response.stop_reason === "max_tokens") {
-    throw new AnalysisGenerationError(
-      "A section was cut off mid-generation (token limit). Try again."
-    );
-  }
-  const text = response.content.find((b) => b.type === "text");
-  if (!text || text.type !== "text") {
-    throw new AnalysisGenerationError("Empty model response for a section. Try again.");
-  }
-  const parsed = schema.safeParse(JSON.parse(text.text));
-  if (!parsed.success) {
-    throw new AnalysisGenerationError(
-      "A section response did not match the expected format. Try again."
-    );
-  }
-  return parsed.data;
+  // Unreachable, but satisfies the type checker.
+  throw new AnalysisGenerationError("Analysis failed. Please try again.");
 }
 
 /** Generate the six-tab rich note via five parallel structured calls. */
