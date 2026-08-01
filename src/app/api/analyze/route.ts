@@ -70,11 +70,17 @@ export async function POST(request: NextRequest) {
         getPeerSymbols(ticker),
         getRecentNews(ticker),
         getEarningsSurprises(ticker).catch(() => []),
-        getFinancialsReported(ticker).catch(() => null),
+        // Track whether the lookup FAILED as distinct from returning nothing:
+        // a failed request says nothing about whether the company files.
+        getFinancialsReported(ticker)
+          .then((data) => ({ ok: true as const, data }))
+          .catch(() => ({ ok: false as const, data: null })),
       ]);
 
-    // SEC filings coverage varies (non-US filers have none) — best-effort.
-    const secFinancials = reported ? extractSecFinancials(reported) : null;
+    const secLookupFailed = !reported.ok;
+    const secFinancials = reported.data
+      ? extractSecFinancials(reported.data)
+      : null;
 
     if (isUnknownTicker(profile)) {
       return NextResponse.json(
@@ -173,6 +179,7 @@ export async function POST(request: NextRequest) {
         surprisePercent: e.surprisePercent,
       })),
       secFinancials,
+      secLookupFailed,
       newsHeadlines: news.slice(0, 8).map((item) => ({
         headline: item.headline,
         date: new Date(item.datetime * 1000).toISOString().slice(0, 10),

@@ -22,7 +22,7 @@ export { FinnhubError };
 
 const cache = new Map<string, { expires: number; data: unknown }>();
 
-async function get<T>(path: string, ttlMs: number): Promise<T> {
+async function get<T>(path: string, ttlMs: number, attempt = 1): Promise<T> {
   const hit = cache.get(path);
   if (hit && hit.expires > Date.now()) return hit.data as T;
 
@@ -33,6 +33,13 @@ async function get<T>(path: string, ttlMs: number): Promise<T> {
   });
 
   if (res.status === 429) {
+    // An analysis fires ~15 calls in a burst against a 60/min free tier, so
+    // transient limits are expected. Back off once before giving up —
+    // otherwise a blip gets mistaken for "this company has no data".
+    if (attempt === 1) {
+      await new Promise((r) => setTimeout(r, 1500));
+      return get<T>(path, ttlMs, attempt + 1);
+    }
     throw new FinnhubError(
       "Finnhub rate limit hit (60 requests/min on the free tier). Wait a minute and try again.",
       429

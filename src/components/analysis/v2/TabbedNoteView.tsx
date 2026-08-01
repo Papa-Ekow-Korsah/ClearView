@@ -95,10 +95,11 @@ function VerifiedTag() {
  *    never ran. Says nothing about the company — just regenerate.
  * Distinguished by whether the key exists on the stored note at all.
  */
-type SecStatus = "verified" | "unavailable" | "legacy";
+type SecStatus = "verified" | "unavailable" | "lookupFailed" | "legacy";
 
 function secStatusOf(note: ResearchNoteV2): SecStatus {
   if (note.secFinancials) return "verified";
+  if (note.secLookupFailed) return "lookupFailed";
   return "secFinancials" in note ? "unavailable" : "legacy";
 }
 
@@ -110,19 +111,39 @@ function CoverageWarning({ ticker }: { ticker: string }) {
       </span>
       <div>
         <p className="text-[13px] font-medium text-warn mb-1">
-          No SEC filings available for {ticker} — financials below are AI
-          estimates
+          No 10-Q/10-K on file for {ticker} — financials below are AI estimates
         </p>
         <p className="text-xs text-ink-2 leading-relaxed">
-          ClearView verifies financials against as-reported SEC filings, which
-          cover US-listed domestic filers. This company doesn&apos;t have them
-          available — it may be a foreign issuer or an ADR filing a 20-F — so
-          the balance sheet, margins and cash flow come from the model&apos;s
-          knowledge rather than a filing. Price, ratios and peer metrics are
-          still live market data. Treat the earnings figures with extra caution
-          and check them against the company&apos;s own reports.
+          Being listed in the US isn&apos;t the same as filing US domestic
+          reports. Foreign private issuers — including ADRs — file 20-F or 40-F
+          instead, which this verification path doesn&apos;t read, and a
+          recently listed company may not have filed yet. So the balance sheet,
+          margins and cash flow here come from the model&apos;s knowledge rather
+          than a filing. Price, ratios and peer metrics are still live market
+          data. Treat the earnings figures with extra caution and check them
+          against the company&apos;s own reports.
         </p>
       </div>
+    </div>
+  );
+}
+
+function LookupFailedNotice({ ticker }: { ticker: string }) {
+  return (
+    <div className="bg-surface-2 border border-line rounded-card px-4 py-3 mb-5 flex items-start gap-3">
+      <span className="text-ink-3 text-sm leading-none mt-0.5" aria-hidden>
+        ℹ
+      </span>
+      <p className="text-xs text-ink-2 leading-relaxed">
+        <span className="font-medium text-ink">
+          Couldn&apos;t reach the filings service when this note was generated.
+        </span>{" "}
+        The financials below are AI estimates as a result. This says nothing
+        about whether {ticker}{" "}
+        files with the SEC — the lookup simply didn&apos;t complete, usually a
+        rate limit. Re-running the analysis will normally pick up the verified
+        figures.
+      </p>
     </div>
   );
 }
@@ -258,6 +279,9 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
         <div className="max-w-5xl mx-auto w-full">
           {secStatus === "unavailable" && (
             <CoverageWarning ticker={note.ticker} />
+          )}
+          {secStatus === "lookupFailed" && (
+            <LookupFailedNotice ticker={note.ticker} />
           )}
           {secStatus === "legacy" && <LegacyNotice />}
           {tab === "overview" && <OverviewTab note={note} mode={mode} />}

@@ -293,8 +293,19 @@ export interface ResearchNoteV2 {
   peers: PeerRow[];
   ratioValues: RatioValue[];
   epsSurprises: EpsSurprise[];
-  /** As-reported SEC filing figures; null when unavailable (e.g. non-US filers). */
+  /**
+   * As-reported SEC filing figures. Null means the lookup ran and the
+   * company genuinely has none (foreign private issuers filing 20-F/40-F).
+   * Absent entirely means the note predates verified-filing support.
+   */
   secFinancials?: SecFinancials | null;
+  /**
+   * True when the filings lookup itself failed (rate limit, network). Kept
+   * separate from a null result: "we couldn't check" is a fact about the
+   * request, while null is a claim about the company. Conflating them makes
+   * the app assert something false.
+   */
+  secLookupFailed?: boolean;
   newsHeadlines: { headline: string; date: string; source: string }[];
   ai: AiNoteV2;
 }
