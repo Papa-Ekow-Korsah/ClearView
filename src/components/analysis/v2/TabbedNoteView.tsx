@@ -86,6 +86,66 @@ function VerifiedTag() {
   );
 }
 
+/**
+ * Two different reasons a note can lack verified figures, and conflating
+ * them would itself be a false claim:
+ *  - "unavailable": the SEC lookup ran and found nothing (foreign issuer,
+ *    ADR filing 20-F). A real coverage limit worth warning about.
+ *  - "legacy": the note predates verified-filing support, so the lookup
+ *    never ran. Says nothing about the company — just regenerate.
+ * Distinguished by whether the key exists on the stored note at all.
+ */
+type SecStatus = "verified" | "unavailable" | "legacy";
+
+function secStatusOf(note: ResearchNoteV2): SecStatus {
+  if (note.secFinancials) return "verified";
+  return "secFinancials" in note ? "unavailable" : "legacy";
+}
+
+function CoverageWarning({ ticker }: { ticker: string }) {
+  return (
+    <div className="bg-warn-bg border border-warn-bdr rounded-card px-4 py-3 mb-5 flex items-start gap-3">
+      <span className="text-warn text-sm leading-none mt-0.5" aria-hidden>
+        ⚠
+      </span>
+      <div>
+        <p className="text-[13px] font-medium text-warn mb-1">
+          No SEC filings available for {ticker} — financials below are AI
+          estimates
+        </p>
+        <p className="text-xs text-ink-2 leading-relaxed">
+          ClearView verifies financials against as-reported SEC filings, which
+          cover US-listed domestic filers. This company doesn&apos;t have them
+          available — it may be a foreign issuer or an ADR filing a 20-F — so
+          the balance sheet, margins and cash flow come from the model&apos;s
+          knowledge rather than a filing. Price, ratios and peer metrics are
+          still live market data. Treat the earnings figures with extra caution
+          and check them against the company&apos;s own reports.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function LegacyNotice() {
+  return (
+    <div className="bg-surface-2 border border-line rounded-card px-4 py-3 mb-5 flex items-start gap-3">
+      <span className="text-ink-3 text-sm leading-none mt-0.5" aria-hidden>
+        ℹ
+      </span>
+      <p className="text-xs text-ink-2 leading-relaxed">
+        <span className="font-medium text-ink">
+          This note predates verified-filing support.
+        </span>{" "}
+        Its financials are AI estimates because the SEC lookup didn&apos;t exist
+        when it was generated — that&apos;s a fact about the note, not about the
+        company. Re-run the analysis to get figures checked against the latest
+        10-Q or 10-K.
+      </p>
+    </div>
+  );
+}
+
 function Panel({
   title,
   tag,
@@ -116,6 +176,7 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
   const { ai, snapshot } = note;
   const sig = SIGNAL_STYLE[ai.signal];
   const live = useLiveQuote(note.ticker);
+  const secStatus = secStatusOf(note);
   const price = live?.price ?? snapshot.price;
   const changePct = live?.changePct ?? snapshot.dayChangePct;
   const dayPos = (changePct ?? 0) >= 0;
@@ -195,6 +256,10 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
       {/* Tab content */}
       <div className="flex-1 px-5 sm:px-7 py-6">
         <div className="max-w-5xl mx-auto w-full">
+          {secStatus === "unavailable" && (
+            <CoverageWarning ticker={note.ticker} />
+          )}
+          {secStatus === "legacy" && <LegacyNotice />}
           {tab === "overview" && <OverviewTab note={note} mode={mode} />}
           {tab === "earnings" && <EarningsTab note={note} mode={mode} />}
           {tab === "ratios" && <RatiosTab note={note} mode={mode} live={live} />}

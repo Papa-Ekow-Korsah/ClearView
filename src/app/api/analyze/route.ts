@@ -13,6 +13,7 @@ import {
   FinnhubError,
 } from "@/lib/finnhub";
 import { extractSecFinancials } from "@/lib/sec";
+import { validateTicker } from "@/lib/ticker";
 import { selectPeers, buildPeerRow, orderRows } from "@/lib/peers";
 import { buildRatioValues } from "@/lib/ratios";
 import { AnalysisGenerationError } from "@/lib/anthropic";
@@ -24,30 +25,25 @@ import type { ResearchNoteV2 } from "@/types/analysis-v2";
 
 export const maxDuration = 300; // six-section generation takes 1-3 minutes
 
-const TICKER_RE = /^[A-Z]{1,6}$/;
-
 export async function POST(request: NextRequest) {
   const denied = await requireOwner();
   if (denied) return denied;
 
-  let ticker: string;
+  let rawTicker: string;
   try {
     const body = await request.json();
-    ticker = String(body.ticker ?? "")
-      .trim()
-      .toUpperCase();
+    rawTicker = String(body.ticker ?? "");
   } catch {
     return NextResponse.json(
       { error: "Request body must be JSON with a ticker field." },
       { status: 400 }
     );
   }
-  if (!TICKER_RE.test(ticker)) {
-    return NextResponse.json(
-      { error: "Ticker must be 1-6 letters, e.g. AAPL." },
-      { status: 400 }
-    );
+  const validation = validateTicker(rawTicker);
+  if (!validation.ok) {
+    return NextResponse.json({ error: validation.error }, { status: 400 });
   }
+  const ticker = validation.ticker;
 
   const rate = await checkRateLimit(
     "analyze",

@@ -14,6 +14,14 @@ The division of labour is the core design decision:
 
 Public visitors can read the research archive (`/history`, `/analysis/[id]`) and the About page. Generating analyses and editing the watchlist require the owner login. All third-party API keys live server-side only.
 
+## Scope: US-first
+
+ClearView deliberately covers **US-listed equities**. The verified-data layer reads as-reported 10-Q/10-K filings, which depends on SEC EDGAR being free, public domain, and structured — no free equivalent exists for other markets, and commercial global fundamentals are priced far beyond a personal tool.
+
+Companies without SEC filings (foreign issuers, ADRs filing 20-F) still analyse, but their financials are AI-generated estimates and the page shows an explicit coverage warning. Exchange-suffixed tickers like `TSCO.L` are rejected with an explanation rather than a format error.
+
+Tested research on what UK/international support would require — including a viable free data path and why the Earnings tab structure would have to change — is in [docs/uk-coverage.md](docs/uk-coverage.md).
+
 ## Stack
 
 - Next.js 16 (App Router) + TypeScript + Tailwind CSS 4

@@ -5,6 +5,7 @@ import { db } from "@/lib/db/client";
 import { analyses, watchlist } from "@/lib/db/schema";
 import { getProfile, isUnknownTicker, FinnhubError } from "@/lib/finnhub";
 import { getFiveDayCloses } from "@/lib/history";
+import { validateTicker } from "@/lib/ticker";
 
 const TICKER_RE = /^[A-Z]{1,6}$/;
 const MAX_WATCHLIST = 20;
@@ -49,24 +50,21 @@ export async function POST(request: NextRequest) {
   const denied = await requireOwner();
   if (denied) return denied;
 
-  let ticker: string;
+  let rawTicker: string;
   try {
     const body = await request.json();
-    ticker = String(body.ticker ?? "")
-      .trim()
-      .toUpperCase();
+    rawTicker = String(body.ticker ?? "");
   } catch {
     return NextResponse.json(
       { error: "Request body must be JSON with a ticker field." },
       { status: 400 }
     );
   }
-  if (!TICKER_RE.test(ticker)) {
-    return NextResponse.json(
-      { error: "Ticker must be 1-6 letters." },
-      { status: 400 }
-    );
+  const validation = validateTicker(rawTicker);
+  if (!validation.ok) {
+    return NextResponse.json({ error: validation.error }, { status: 400 });
   }
+  const ticker = validation.ticker;
 
   const existing = await db().select().from(watchlist);
   if (existing.some((r) => r.ticker === ticker)) {

@@ -96,6 +96,27 @@ export default function AboutPage() {
           </p>
         </Section>
 
+        <Section title="What it covers">
+          <p>
+            ClearView is a <strong className="text-ink">US-first tool</strong>,
+            and that&apos;s a deliberate scope rather than an oversight. The
+            thing that makes it trustworthy — checking financials against
+            as-reported filings instead of taking an AI&apos;s word for them —
+            depends on SEC EDGAR being free, public, and machine-readable. No
+            equivalent exists for the London or Shanghai exchanges, and
+            commercial global fundamentals cost more per month than this tool
+            will ever justify.
+          </p>
+          <p>
+            So: US-listed companies get verified balance sheets, margins and
+            cash flow straight from their 10-Q and 10-K filings. Anything
+            outside that — foreign issuers, ADRs filing 20-F — still gets an
+            analysis, but the financial figures are AI-generated estimates and
+            the page says so in a warning you can&apos;t miss. Being narrow and
+            honest about it beats being broad and quietly unreliable.
+          </p>
+        </Section>
+
         <Section title="What this is not">
           <p>
             This is a personal research tool, not investment advice. The notes
