@@ -19,6 +19,12 @@ export const analyses = pgTable("analyses", {
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
+  /**
+   * Soft delete. Deleting a call must not erase it from the track record —
+   * otherwise the record silently becomes survivorship-biased. Hidden from
+   * the history list, still scored.
+   */
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
 
 export const watchlist = pgTable(

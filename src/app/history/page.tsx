@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { listAnalyses } from "@/lib/db/queries";
 import { isAuthenticated } from "@/lib/auth/session";
-import { DeleteAnalysisButton } from "@/components/history/DeleteAnalysisButton";
+import {
+  HistoryLedger,
+  type LedgerRow,
+} from "@/components/history/HistoryLedger";
+import type { ResearchNote } from "@/types/analysis";
+import type { ResearchNoteV2 } from "@/types/analysis-v2";
 
 export const metadata: Metadata = { title: "Research history | ClearView" };
 
@@ -23,9 +28,23 @@ export default async function HistoryPage({
   const allRows = filter ? await listAnalyses() : rows;
   const tickers = [...new Set(allRows.map((r) => r.ticker))].sort();
 
+  const ledgerRows: LedgerRow[] = rows.map((r) => {
+    const note = r.note as ResearchNote | ResearchNoteV2;
+    const isV2 = "formatVersion" in note && note.formatVersion === 2;
+    const v2 = isV2 ? (note as ResearchNoteV2) : null;
+    return {
+      id: r.id,
+      ticker: r.ticker,
+      companyName: r.companyName,
+      createdAt: r.createdAt.toISOString(),
+      signal: v2?.ai?.signal ?? null,
+      verified: v2?.secFinancials != null,
+    };
+  });
+
   return (
     <main className="flex-1">
-      <div className="max-w-2xl mx-auto w-full px-5 sm:px-7 py-7">
+      <div className="max-w-3xl mx-auto w-full px-5 sm:px-7 py-7">
         <div className="flex items-baseline justify-between mb-1.5 flex-wrap gap-2">
           <h1 className="text-xl font-semibold tracking-tight">
             Research history
@@ -60,7 +79,9 @@ export default async function HistoryPage({
         {rows.length === 0 ? (
           <div className="bg-surface border border-line rounded-card py-12 text-center">
             <p className="text-sm text-ink-2 mb-1">
-              {filter ? `No saved notes for ${filter}.` : "No research notes yet."}
+              {filter
+                ? `No saved notes for ${filter}.`
+                : "No research notes yet."}
             </p>
             <p className="text-xs text-ink-3">
               {authed
@@ -69,34 +90,11 @@ export default async function HistoryPage({
             </p>
           </div>
         ) : (
-          <div className="bg-surface border border-line rounded-card overflow-hidden">
-            {rows.map((row) => (
-              <div
-                key={row.id}
-                className="flex items-center gap-3 px-4 py-3 border-b border-line last:border-b-0 hover:bg-surface-2/60 transition-colors"
-              >
-                <Link
-                  href={`/analysis/${row.id}`}
-                  className="flex items-baseline gap-3 flex-1 min-w-0"
-                >
-                  <span className="text-[13px] font-mono font-semibold w-14 shrink-0">
-                    {row.ticker}
-                  </span>
-                  <span className="text-[13px] text-ink-2 truncate">
-                    {row.companyName}
-                  </span>
-                  <span className="text-[11px] text-ink-3 ml-auto shrink-0 font-mono">
-                    {row.createdAt.toLocaleDateString("en-GB", {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </span>
-                </Link>
-                {authed && <DeleteAnalysisButton id={row.id} />}
-              </div>
-            ))}
-          </div>
+          <HistoryLedger
+            rows={ledgerRows}
+            authed={authed}
+            filtered={Boolean(filter)}
+          />
         )}
       </div>
     </main>
