@@ -1,11 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOwner } from "@/lib/auth/guard";
 
-// TEMPORARY diagnostic: EDGAR retrieval works locally but returns null on
-// Vercel. Every step is try/caught in lib/edgar.ts, so this reports where
-// it actually breaks. Owner-only; delete once diagnosed.
-const UA =
+// TEMPORARY diagnostic. SEC 403s ("Request Rate Threshold Exceeded") from
+// Vercel while the identical request succeeds from a residential IP. Probe
+// each host and User-Agent variant independently to tell an IP-level block
+// apart from a User-Agent policy rejection. Owner-only; delete once fixed.
+
+const UA_URL =
   "ClearView personal research tool (contact via github.com/Papa-Ekow-Korsah/ClearView)";
+const UA_PLAIN = "ClearView/2.0";
+
+async function probe(url: string, ua: string) {
+  const t0 = Date.now();
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": ua },
+      cache: "no-store",
+    });
+    const body = res.ok ? "" : (await res.text()).slice(0, 160).replace(/\s+/g, " ");
+    return { status: res.status, ms: Date.now() - t0, body };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : String(err), ms: Date.now() - t0 };
+  }
+}
 
 export async function GET(
   _req: NextRequest,
@@ -13,72 +30,25 @@ export async function GET(
 ) {
   const denied = await requireOwner();
   if (denied) return denied;
+  await params;
 
-  const { ticker } = await params;
-  const steps: Record<string, unknown> = {};
-
-  try {
-    const t0 = Date.now();
-    const tickRes = await fetch("https://www.sec.gov/files/company_tickers.json", {
-      headers: { "User-Agent": UA },
-      cache: "no-store",
-    });
-    steps.tickerTable = {
-      status: tickRes.status,
-      ms: Date.now() - t0,
-      contentType: tickRes.headers.get("content-type"),
-    };
-    if (!tickRes.ok) {
-      steps.tickerTableBody = (await tickRes.text()).slice(0, 300);
-      return NextResponse.json(steps);
-    }
-
-    const raw = (await tickRes.json()) as Record<
-      string,
-      { cik_str: number; ticker: string }
-    >;
-    const hit = Object.values(raw).find(
-      (e) => e?.ticker?.toUpperCase() === ticker.toUpperCase()
-    );
-    steps.cik = hit ? String(hit.cik_str).padStart(10, "0") : null;
-    if (!hit) return NextResponse.json(steps);
-
-    const cik = String(hit.cik_str).padStart(10, "0");
-    const subRes = await fetch(`https://data.sec.gov/submissions/CIK${cik}.json`, {
-      headers: { "User-Agent": UA },
-      cache: "no-store",
-    });
-    steps.submissions = { status: subRes.status };
-    if (!subRes.ok) {
-      steps.submissionsBody = (await subRes.text()).slice(0, 300);
-      return NextResponse.json(steps);
-    }
-
-    const subs = await subRes.json();
-    const r = subs?.filings?.recent;
-    const idx = (r?.form ?? []).findIndex(
-      (f: string, i: number) => f === "8-K" && (r.items?.[i] ?? "").includes("2.02")
-    );
-    steps.found8K = idx > -1 ? { date: r.filingDate[idx], acc: r.accessionNumber[idx] } : null;
-    if (idx === -1) return NextResponse.json(steps);
-
-    const acc = r.accessionNumber[idx].replace(/-/g, "");
-    const base = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${acc}`;
-    const idxRes = await fetch(`${base}/index.json`, {
-      headers: { "User-Agent": UA },
-      cache: "no-store",
-    });
-    steps.filingIndex = { status: idxRes.status };
-    if (!idxRes.ok) {
-      steps.filingIndexBody = (await idxRes.text()).slice(0, 300);
-      return NextResponse.json(steps);
-    }
-
-    const dir = await idxRes.json();
-    steps.files = (dir?.directory?.item ?? []).map((f: { name: string }) => f.name);
-    return NextResponse.json(steps);
-  } catch (err) {
-    steps.threw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    return NextResponse.json(steps, { status: 500 });
-  }
+  // NVDA CIK is fixed, so these URLs need no prior lookup.
+  return NextResponse.json({
+    "www.sec.gov tickers (UA with url)": await probe(
+      "https://www.sec.gov/files/company_tickers.json",
+      UA_URL
+    ),
+    "www.sec.gov tickers (plain UA)": await probe(
+      "https://www.sec.gov/files/company_tickers.json",
+      UA_PLAIN
+    ),
+    "data.sec.gov submissions (UA with url)": await probe(
+      "https://data.sec.gov/submissions/CIK0001045810.json",
+      UA_URL
+    ),
+    "www.sec.gov Archives index (UA with url)": await probe(
+      "https://www.sec.gov/Archives/edgar/data/1045810/000104581026000051/index.json",
+      UA_URL
+    ),
+  });
 }
