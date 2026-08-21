@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { PeerRow, Snapshot } from "@/types/analysis";
 import type { SecFinancials } from "@/lib/sec";
+import type { RetrievalResult } from "@/lib/websearch";
 
 /**
  * V2 rich note format — the six-tab deep dive carried over from ClearView v1
@@ -312,6 +313,12 @@ export interface ResearchNoteV2 {
    * null means it wasn't retrievable and guidance is unsourced.
    */
   guidanceSource?: { url: string; filedDate: string; form: string } | null;
+  /**
+   * Publicly reported facts with no affordable feed (revenue consensus,
+   * analyst ratings and targets), retrieved by web search with a citation
+   * and a credibility tier per figure. Absent on older notes.
+   */
+  retrieved?: RetrievalResult | null;
   newsHeadlines: { headline: string; date: string; source: string }[];
   ai: AiNoteV2;
 }

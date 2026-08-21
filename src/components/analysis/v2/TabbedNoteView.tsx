@@ -95,6 +95,43 @@ function SourcedTag({ href, label }: { href: string; label: string }) {
   );
 }
 
+/**
+ * A retrieved figure with its source. Credibility is shown, not hidden: an
+ * established outlet reads as neutral, an unrecognised one carries a visible
+ * caution, because for small caps the only coverage is often weak and
+ * pretending otherwise would be the dishonest option.
+ */
+function SourceCite({
+  domain,
+  url,
+  tier,
+  note,
+}: {
+  domain: string | null;
+  url: string | null;
+  tier: "primary" | "established" | "caution" | null;
+  note: string | null;
+}) {
+  if (!url || !domain) return null;
+  const caution = tier === "caution";
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={note ?? undefined}
+      className={`inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 hover:underline ${
+        caution
+          ? "bg-warn-bg text-warn font-medium"
+          : "bg-surface-2 text-ink-3"
+      }`}
+    >
+      {caution ? "⚠ unverified source: " : ""}
+      {domain} ↗
+    </a>
+  );
+}
+
 function VerifiedTag() {
   return (
     <span
@@ -348,9 +385,18 @@ function ModeToggle({ mode, setMode }: { mode: Mode; setMode: (m: Mode) => void 
 
 // ── Overview ─────────────────────────────────────────────────────
 
+/** A retrieved fact, only if it carried a usable source. */
+function factOf(note: ResearchNoteV2, field: string) {
+  return note.retrieved?.facts?.find((f) => f.field === field && f.url) ?? null;
+}
+
 function OverviewTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
   void mode;
   const { ai, snapshot } = note;
+  const rating = factOf(note, "ANALYST_RATING");
+  const target = factOf(note, "PRICE_TARGET");
+  const moves = factOf(note, "RECENT_MOVES");
+
   return (
     <div>
       <SectionLabel>At a glance</SectionLabel>
@@ -358,22 +404,70 @@ function OverviewTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
         <MetricCard label="Price" value={snapshot.price !== null ? `$${snapshot.price.toFixed(2)}` : "—"} />
         <MetricCard label="Market cap" value={fmtCap(snapshot.marketCap)} />
         <MetricCard label="Signal" value={ai.signal} />
-        <MetricCard label="Street consensus" value={ai.overview.analystConsensus} small aiSourced />
+        {rating ? (
+          <div className="bg-surface border border-line rounded-el px-3.5 py-3">
+            <p className="text-[11px] text-ink-3 mb-1">Street consensus</p>
+            <p className="text-[13px] font-semibold font-mono mb-1.5">{rating.value}</p>
+            <SourceCite
+              domain={rating.domain}
+              url={rating.url}
+              tier={rating.tier}
+              note={rating.note}
+            />
+          </div>
+        ) : (
+          <MetricCard
+            label="Street consensus"
+            value={ai.overview.analystConsensus}
+            small
+            aiSourced
+          />
+        )}
       </div>
 
-      {ai.overview.recentMoves.length > 0 && (
+      {target && (
+        <div className="bg-surface border border-line rounded-card px-4 py-3 mb-6 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-[11px] text-ink-3 mb-0.5">Average analyst price target</p>
+            <p className="text-[15px] font-semibold font-mono">{target.value}</p>
+          </div>
+          <SourceCite
+            domain={target.domain}
+            url={target.url}
+            tier={target.tier}
+            note={target.note}
+          />
+        </div>
+      )}
+
+      {moves ? (
         <>
-          <SectionLabel>
-            Recent analyst moves <span className="normal-case tracking-normal ml-1"><AiSourcedTag /></span>
-          </SectionLabel>
-          <div className="bg-surface border border-line rounded-card px-4 py-1 mb-6">
-            {ai.overview.recentMoves.map((m, i) => (
-              <p key={i} className="text-[13px] text-ink-2 py-2.5 border-b border-line last:border-b-0 leading-relaxed">
-                {m}
-              </p>
-            ))}
+          <SectionLabel>Recent analyst moves</SectionLabel>
+          <div className="bg-surface border border-line rounded-card px-4 py-3 mb-6">
+            <p className="text-[13px] text-ink-2 leading-relaxed mb-2">{moves.value}</p>
+            <SourceCite
+              domain={moves.domain}
+              url={moves.url}
+              tier={moves.tier}
+              note={moves.note}
+            />
           </div>
         </>
+      ) : (
+        ai.overview.recentMoves.length > 0 && (
+          <>
+            <SectionLabel>
+              Recent analyst moves <span className="normal-case tracking-normal ml-1"><AiSourcedTag /></span>
+            </SectionLabel>
+            <div className="bg-surface border border-line rounded-card px-4 py-1 mb-6">
+              {ai.overview.recentMoves.map((m, i) => (
+                <p key={i} className="text-[13px] text-ink-2 py-2.5 border-b border-line last:border-b-0 leading-relaxed">
+                  {m}
+                </p>
+              ))}
+            </div>
+          </>
+        )
       )}
 
       <SectionLabel>Bull vs bear</SectionLabel>
@@ -445,6 +539,7 @@ function pct(numerator: number | null, denominator: number | null): number | nul
 function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
   const e = note.ai.earnings;
   const sec = note.secFinancials ?? null;
+  const revConsensus = factOf(note, "REVENUE_CONSENSUS");
   const latestEps = note.epsSurprises[0];
   const beat = (latestEps?.surprisePercent ?? 0) >= 0;
 
@@ -476,16 +571,29 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
             {sec?.incomeStatement.revenue != null ? usd(sec.incomeStatement.revenue) : e.revenue.value}
           </p>
           {/*
-            Revenue consensus isn't available on any free feed, so this line
-            is AI-recalled even when the headline figure above it came from
-            the filing. Mark it, or the verified badge would be covering an
-            unverified number.
+            Revenue consensus has no free feed, so it is either retrieved
+            from a cited page or left as AI recall — never silently mixed in
+            under the verified badge above.
           */}
-          <p className="text-[10px] text-ink-3">
-            Est. {e.revenue.estimate}{" "}
-            <span className="text-pos font-semibold">{e.revenue.beat}</span>
-            <span className="ml-1 text-ink-3 italic">(consensus: AI recall)</span>
-          </p>
+          {revConsensus ? (
+            <>
+              <p className="text-[10px] text-ink-3">Est. {revConsensus.value}</p>
+              <div className="mt-1">
+                <SourceCite
+                  domain={revConsensus.domain}
+                  url={revConsensus.url}
+                  tier={revConsensus.tier}
+                  note={revConsensus.note}
+                />
+              </div>
+            </>
+          ) : (
+            <p className="text-[10px] text-ink-3">
+              Est. {e.revenue.estimate}{" "}
+              <span className="text-pos font-semibold">{e.revenue.beat}</span>
+              <span className="ml-1 text-ink-3 italic">(AI estimate — no source)</span>
+            </p>
+          )}
           <p className="text-[10px] text-pos mt-0.5">
             {sec?.incomeStatement.revenueYoYPct != null
               ? `${sec.incomeStatement.revenueYoYPct >= 0 ? "+" : ""}${sec.incomeStatement.revenueYoYPct.toFixed(1)}%`

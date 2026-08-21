@@ -14,6 +14,7 @@ import {
 } from "@/lib/finnhub";
 import { extractSecFinancials } from "@/lib/sec";
 import { getLatestEarningsRelease } from "@/lib/edgar";
+import { retrievePublicFacts } from "@/lib/websearch";
 import { validateTicker } from "@/lib/ticker";
 import { selectPeers, buildPeerRow, orderRows } from "@/lib/peers";
 import { buildRatioValues } from "@/lib/ratios";
@@ -115,9 +116,11 @@ export async function POST(request: NextRequest) {
       currency: profile.currency ?? null,
     };
 
-    // 2. Peer data (parallel per peer; tolerate individual failures)
+    // 2. Peer data, plus web retrieval of facts with no feed (consensus,
+    //    ratings, targets). Both need the profile, so they run together.
     const peerTickers = selectPeers(ticker, peerSymbols);
-    const peerData = await Promise.all(
+    const [peerData, retrieved] = await Promise.all([
+      Promise.all(
       peerTickers.map(async (pt) => {
         try {
           const [pProfile, pMetrics] = await Promise.all([
@@ -139,7 +142,9 @@ export async function POST(request: NextRequest) {
           return null;
         }
       })
-    );
+      ),
+      retrievePublicFacts(ticker, profile.name ?? ticker).catch(() => null),
+    ]);
     const livePeers = peerData.filter((p): p is NonNullable<typeof p> => p !== null);
 
     const subjectRow = buildPeerRow(
@@ -174,6 +179,7 @@ export async function POST(request: NextRequest) {
       })),
       secFinancials,
       earningsRelease,
+      retrieved,
       news,
     });
 
@@ -201,6 +207,7 @@ export async function POST(request: NextRequest) {
             form: earningsRelease.form,
           }
         : null,
+      retrieved,
       newsHeadlines: news.slice(0, 8).map((item) => ({
         headline: item.headline,
         date: new Date(item.datetime * 1000).toISOString().slice(0, 10),

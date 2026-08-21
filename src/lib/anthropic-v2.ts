@@ -20,6 +20,7 @@ import type { PeerRow, Snapshot } from "@/types/analysis";
 import type { NewsItem } from "@/lib/finnhub";
 import type { SecFinancials } from "@/lib/sec";
 import type { EarningsRelease } from "@/lib/edgar";
+import { foundFacts, type RetrievalResult } from "@/lib/websearch";
 
 export interface NoteInputV2 {
   ticker: string;
@@ -32,7 +33,25 @@ export interface NoteInputV2 {
   epsSurprises: EpsSurprise[];
   secFinancials: SecFinancials | null;
   earningsRelease: EarningsRelease | null;
+  retrieved: RetrievalResult | null;
   news: NewsItem[];
+}
+
+function retrievedBlock(result: RetrievalResult | null): string {
+  const facts = foundFacts(result);
+  if (facts.length === 0) {
+    return `RETRIEVED PUBLIC FACTS: none could be sourced. For analyst consensus, ratings and price targets, write "Not available" rather than recalling a figure — an unsourced number presented as consensus is exactly the error this tool exists to avoid.`;
+  }
+  const lines = facts
+    .map(
+      (f) =>
+        `${f.field}: ${f.value}  [source: ${f.domain}, credibility: ${f.tier}]`
+    )
+    .join("\n");
+  return `RETRIEVED PUBLIC FACTS (each read from a live page; the app displays the source link and credibility tier beside them):
+${lines}
+
+Use these exact values wherever the note refers to analyst consensus, ratings, price targets or recent analyst moves. Do not adjust them and do not substitute remembered figures. For any of these not listed above, write "Not available".`;
 }
 
 function usd(v: number | null): string {
@@ -134,6 +153,8 @@ ${epsTable || "n/a"}
 ${secBlock(input.secFinancials)}
 
 ${releaseBlock(input.earningsRelease)}
+
+${retrievedBlock(input.retrieved)}
 
 Recent news (last 30 days):
 ${headlines || "none"}
