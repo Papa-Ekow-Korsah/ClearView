@@ -13,6 +13,7 @@ import {
   FinnhubError,
 } from "@/lib/finnhub";
 import { extractSecFinancials } from "@/lib/sec";
+import { getLatestEarningsRelease } from "@/lib/edgar";
 import { validateTicker } from "@/lib/ticker";
 import { selectPeers, buildPeerRow, orderRows } from "@/lib/peers";
 import { buildRatioValues } from "@/lib/ratios";
@@ -62,8 +63,16 @@ export async function POST(request: NextRequest) {
 
   try {
     // 1. Subject company data (parallel)
-    const [profile, quote, metricsRes, peerSymbols, news, epsSurprises, reported] =
-      await Promise.all([
+    const [
+      profile,
+      quote,
+      metricsRes,
+      peerSymbols,
+      news,
+      epsSurprises,
+      reported,
+      earningsRelease,
+    ] = await Promise.all([
         getProfile(ticker),
         getQuote(ticker),
         getMetrics(ticker),
@@ -75,6 +84,10 @@ export async function POST(request: NextRequest) {
         getFinancialsReported(ticker)
           .then((data) => ({ ok: true as const, data }))
           .catch(() => ({ ok: false as const, data: null })),
+        // Guidance isn't in any affordable feed, but it's stated verbatim in
+        // the 8-K earnings release — retrieve it so the model extracts rather
+        // than recalls.
+        getLatestEarningsRelease(ticker).catch(() => null),
       ]);
 
     const secLookupFailed = !reported.ok;
@@ -160,6 +173,7 @@ export async function POST(request: NextRequest) {
         surprisePercent: e.surprisePercent,
       })),
       secFinancials,
+      earningsRelease,
       news,
     });
 
@@ -180,6 +194,13 @@ export async function POST(request: NextRequest) {
       })),
       secFinancials,
       secLookupFailed,
+      guidanceSource: earningsRelease
+        ? {
+            url: earningsRelease.url,
+            filedDate: earningsRelease.filedDate,
+            form: earningsRelease.form,
+          }
+        : null,
       newsHeadlines: news.slice(0, 8).map((item) => ({
         headline: item.headline,
         date: new Date(item.datetime * 1000).toISOString().slice(0, 10),

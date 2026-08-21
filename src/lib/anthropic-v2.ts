@@ -19,6 +19,7 @@ import {
 import type { PeerRow, Snapshot } from "@/types/analysis";
 import type { NewsItem } from "@/lib/finnhub";
 import type { SecFinancials } from "@/lib/sec";
+import type { EarningsRelease } from "@/lib/edgar";
 
 export interface NoteInputV2 {
   ticker: string;
@@ -30,6 +31,7 @@ export interface NoteInputV2 {
   ratioValues: RatioValue[];
   epsSurprises: EpsSurprise[];
   secFinancials: SecFinancials | null;
+  earningsRelease: EarningsRelease | null;
   news: NewsItem[];
 }
 
@@ -62,6 +64,18 @@ Cash flow (quarter): operating CF ${usd(c.operatingCF)}, capex ${usd(c.capex)}, 
 
 function n(v: number | null, suffix = ""): string {
   return v === null ? "n/a" : `${v.toFixed(2)}${suffix}`;
+}
+
+function releaseBlock(release: EarningsRelease | null): string {
+  if (!release) {
+    return `EARNINGS PRESS RELEASE: not retrievable for this company. You have no source document for guidance, so set every guidance figure to the exact string "Not disclosed" and explain in guidance.narrative that no filed guidance could be retrieved. Do NOT estimate guidance numbers from memory — a fabricated figure attributed to management is the single worst error this tool can make.`;
+  }
+  return `EARNINGS PRESS RELEASE — ${release.form} filed ${release.filedDate} (source document, quoted verbatim below):
+"""
+${release.text}
+"""
+
+GUIDANCE RULES (strict): take every guidance figure ONLY from the press release text above, copying the numbers exactly as written. Do not adjust, round, annualise, or infer them. If the release does not state a particular figure, set that field to the exact string "Not disclosed" — never substitute an estimate or a remembered value. The app displays these next to a link to this filing, so a reader can check any number against the source.`;
 }
 
 function buildPrompt(input: NoteInputV2): string {
@@ -118,6 +132,8 @@ EPS actual vs estimate, last quarters:
 ${epsTable || "n/a"}
 
 ${secBlock(input.secFinancials)}
+
+${releaseBlock(input.earningsRelease)}
 
 Recent news (last 30 days):
 ${headlines || "none"}

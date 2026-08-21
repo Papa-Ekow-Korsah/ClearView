@@ -306,6 +306,12 @@ export interface ResearchNoteV2 {
    * the app assert something false.
    */
   secLookupFailed?: boolean;
+  /**
+   * The filed 8-K the guidance figures were extracted from. Present means
+   * guidance was read out of a real document the reader can open; absent or
+   * null means it wasn't retrievable and guidance is unsourced.
+   */
+  guidanceSource?: { url: string; filedDate: string; form: string } | null;
   newsHeadlines: { headline: string; date: string; source: string }[];
   ai: AiNoteV2;
 }

@@ -75,6 +75,26 @@ function AiSourcedTag() {
   );
 }
 
+/**
+ * Middle provenance tier: figures the model read out of a real filed
+ * document rather than recalled. Weaker than as-reported structured data
+ * (the model still transcribes the digits) but far stronger than memory,
+ * and the reader can open the source and check.
+ */
+function SourcedTag({ href, label }: { href: string; label: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      title="Extracted from this filing — click to read the source"
+      className="inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-accent bg-accent-dim rounded px-1.5 py-0.5 hover:underline"
+    >
+      From {label} ↗
+    </a>
+  );
+}
+
 function VerifiedTag() {
   return (
     <span
@@ -455,9 +475,16 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
           <p className="text-xl font-semibold font-mono leading-none mb-1.5">
             {sec?.incomeStatement.revenue != null ? usd(sec.incomeStatement.revenue) : e.revenue.value}
           </p>
+          {/*
+            Revenue consensus isn't available on any free feed, so this line
+            is AI-recalled even when the headline figure above it came from
+            the filing. Mark it, or the verified badge would be covering an
+            unverified number.
+          */}
           <p className="text-[10px] text-ink-3">
             Est. {e.revenue.estimate}{" "}
             <span className="text-pos font-semibold">{e.revenue.beat}</span>
+            <span className="ml-1 text-ink-3 italic">(consensus: AI recall)</span>
           </p>
           <p className="text-[10px] text-pos mt-0.5">
             {sec?.incomeStatement.revenueYoYPct != null
@@ -689,7 +716,15 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
       <div className="bg-surface border border-line rounded-el p-4 mb-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 className="text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3 flex items-center gap-2">
-            {e.guidance.quarter} guidance <AiSourcedTag />
+            {e.guidance.quarter} guidance{" "}
+            {note.guidanceSource ? (
+              <SourcedTag
+                href={note.guidanceSource.url}
+                label={`${note.guidanceSource.form} ${note.guidanceSource.filedDate}`}
+              />
+            ) : (
+              <AiSourcedTag />
+            )}
           </h3>
           <span className="text-[11px] text-accent bg-accent-dim px-2.5 py-0.5 rounded-full font-medium">
             Reports {e.guidance.nextReportDate}
