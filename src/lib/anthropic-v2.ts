@@ -233,6 +233,10 @@ const SECTION_PROMPTS = {
 /** A section that came back truncated/unparseable — worth another attempt. */
 class SectionRetryable extends Error {}
 
+const SECTION_TIMEOUT_MS = 100_000;
+/** One retry, not two: the whole analysis shares a hard request deadline. */
+const MAX_SECTION_ATTEMPTS = 2;
+
 async function generateSectionOnce<S extends z.ZodType>(
   client: Anthropic,
   basePrompt: string,
@@ -241,16 +245,21 @@ async function generateSectionOnce<S extends z.ZodType>(
 ): Promise<z.infer<S>> {
   let response;
   try {
-    const stream = client.messages.stream({
-      // Generous budget: the dual-voice earnings section is large, and
-      // streaming means no HTTP timeout to worry about.
-      model: config.anthropicModel,
-      max_tokens: 24000,
-      messages: [
-        { role: "user", content: `${basePrompt}\n\nYOUR TASK:\n${sectionPrompt}` },
-      ],
-      output_config: { format: zodOutputFormat(schema) },
-    });
+    const stream = client.messages.stream(
+      {
+        // Generous token budget: the dual-voice earnings section is large.
+        model: config.anthropicModel,
+        max_tokens: 24000,
+        messages: [
+          { role: "user", content: `${basePrompt}\n\nYOUR TASK:\n${sectionPrompt}` },
+        ],
+        output_config: { format: zodOutputFormat(schema) },
+      },
+      // Sections run in parallel, so wall time is the slowest one. Bounded
+      // so that two attempts still fit inside the platform's request limit
+      // alongside data fetching and retrieval.
+      { timeout: SECTION_TIMEOUT_MS }
+    );
     response = await stream.finalMessage();
   } catch (err) {
     // The SDK parses the constrained output inside finalMessage() and throws
@@ -289,14 +298,13 @@ async function generateSection<S extends z.ZodType>(
   sectionPrompt: string,
   schema: S
 ): Promise<z.infer<S>> {
-  const MAX_ATTEMPTS = 3;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  for (let attempt = 1; attempt <= MAX_SECTION_ATTEMPTS; attempt++) {
     try {
       return await generateSectionOnce(client, basePrompt, sectionPrompt, schema);
     } catch (err) {
       // Retry only truncation/parse failures; auth, refusal, rate limit
       // propagate immediately to the outer handler.
-      if (err instanceof SectionRetryable && attempt < MAX_ATTEMPTS) continue;
+      if (err instanceof SectionRetryable && attempt < MAX_SECTION_ATTEMPTS) continue;
       if (err instanceof SectionRetryable) {
         throw new AnalysisGenerationError(
           "A section of the analysis kept coming back incomplete. Please try again."

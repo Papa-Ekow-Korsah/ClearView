@@ -51,6 +51,14 @@ export function TickerSearch({
       });
       const body = await res.json().catch(() => null);
       if (!res.ok) {
+        // A 504 is the platform killing the request, so the route never gets
+        // to explain itself — say something useful on its behalf.
+        if (res.status === 504) {
+          setError(
+            `The analysis for ${t} ran past the time limit and was cut off before it could finish. Nothing was saved. This is usually a slow model or search response rather than a problem with the ticker — trying again normally works.`
+          );
+          return;
+        }
         setError(body?.error ?? `Analysis failed (HTTP ${res.status}).`);
         return;
       }

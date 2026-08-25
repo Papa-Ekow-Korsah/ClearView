@@ -155,47 +155,60 @@ function extractConsulted(
  * Best-effort: any failure returns null and callers fall back to marking the
  * affected fields unsourced rather than filling them from memory.
  */
+/**
+ * Retrieval runs before generation, so its cost is additive to an analysis
+ * that already takes ~100s against a hard platform timeout. It is strictly
+ * budgeted: exceeding the budget abandons retrieval rather than failing the
+ * whole analysis, and the affected fields simply report as not found.
+ */
+const SEARCH_BUDGET_MS = 45_000;
+const MAX_SEARCHES = 4;
+
 export async function retrievePublicFacts(
   ticker: string,
   companyName: string
 ): Promise<RetrievalResult | null> {
   const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const deadline = Date.now() + SEARCH_BUDGET_MS;
+  const remaining = () => Math.max(1_000, deadline - Date.now());
+
+  const request = {
+    model: config.anthropicModel,
+    max_tokens: 4096,
+    tools: [
+      {
+        type: "web_search_20260209" as const,
+        name: "web_search" as const,
+        max_uses: MAX_SEARCHES,
+        blocked_domains: blockedDomains(),
+      },
+    ],
+  };
 
   try {
-    let response = await client.messages.create({
-      model: config.anthropicModel,
-      max_tokens: 4096,
-      tools: [
-        {
-          type: "web_search_20260209",
-          name: "web_search",
-          max_uses: 6,
-          blocked_domains: blockedDomains(),
-        },
-      ],
-      messages: [{ role: "user", content: buildPrompt(ticker, companyName) }],
-    });
+    let response = await client.messages.create(
+      {
+        ...request,
+        messages: [{ role: "user", content: buildPrompt(ticker, companyName) }],
+      },
+      { timeout: remaining() }
+    );
 
-    // Server-side tool loops can pause; resume by re-sending the turn.
-    let guard = 0;
+    // Server-side tool loops can pause; resume only while budget remains.
     const messages: Anthropic.Messages.MessageParam[] = [
       { role: "user", content: buildPrompt(ticker, companyName) },
     ];
-    while (response.stop_reason === "pause_turn" && guard++ < 3) {
+    let guard = 0;
+    while (
+      response.stop_reason === "pause_turn" &&
+      guard++ < 2 &&
+      Date.now() < deadline
+    ) {
       messages.push({ role: "assistant", content: response.content });
-      response = await client.messages.create({
-        model: config.anthropicModel,
-        max_tokens: 4096,
-        tools: [
-          {
-            type: "web_search_20260209",
-            name: "web_search",
-            max_uses: 6,
-            blocked_domains: blockedDomains(),
-          },
-        ],
-        messages,
-      });
+      response = await client.messages.create(
+        { ...request, messages },
+        { timeout: remaining() }
+      );
     }
 
     if (response.stop_reason === "refusal") return null;
