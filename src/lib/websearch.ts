@@ -54,25 +54,43 @@ const FIELDS: RetrievedField[] = [
   "GUIDANCE",
 ];
 
-function buildPrompt(ticker: string, companyName: string): string {
-  return `Find these specific published facts about ${companyName} (${ticker}). Search only as much as needed.
+/**
+ * One question per field, asked in parallel.
+ *
+ * A single call covering all five fields searched sequentially and ran past
+ * five minutes, so it never finished inside any sane budget. Split into
+ * separate calls, each needing a search or two, the whole set completes in
+ * roughly the time of the slowest — and a field that fails or is genuinely
+ * unreported no longer takes the others down with it.
+ */
+const FIELD_QUESTIONS: Record<RetrievedField, string> = {
+  REVENUE_CONSENSUS:
+    "the Wall Street consensus revenue estimate for its most recently reported quarter (what analysts expected, not what the company actually reported)",
+  ANALYST_RATING:
+    'the current consensus analyst rating (for example "Buy", "Hold", or a breakdown such as 24 buy / 3 hold)',
+  PRICE_TARGET: "the current average analyst price target",
+  RECENT_MOVES:
+    "up to two notable analyst rating or price-target changes in the last 30 days, separated by semicolons",
+  GUIDANCE:
+    "management's own revenue or earnings guidance for the current or next quarter, as reported",
+};
 
-Return ONE LINE PER FIELD, in exactly this pipe-delimited format, and nothing else:
-FIELD | value | source URL
+function buildFieldPrompt(
+  ticker: string,
+  companyName: string,
+  field: RetrievedField
+): string {
+  return `Search for ${FIELD_QUESTIONS[field]} for ${companyName} (${ticker}).
 
-Fields to return, in this order:
-REVENUE_CONSENSUS — the Wall Street consensus revenue estimate for the most recently reported quarter (what analysts expected, not what the company reported)
-ANALYST_RATING — the current consensus analyst rating (e.g. "Buy", "Hold", 24 buy / 3 hold)
-PRICE_TARGET — the current average analyst price target
-RECENT_MOVES — up to two notable analyst rating or target changes in the last 30 days, semicolon-separated
-GUIDANCE — management's own guidance for the current or next quarter, as reported
+Reply with exactly one line, in this pipe-delimited format, and nothing else:
+${field} | value | source URL
 
 Rules:
-- Every value MUST come from a page you actually retrieved, and the third column MUST be that page's URL.
-- If you cannot find a field from a real source, write exactly: FIELD | Not found |
+- The value MUST come from a page you actually retrieved, and the third column MUST be that page's URL.
+- If you cannot find it from a real source, reply exactly: ${field} | Not found |
 - Never state a figure you did not read on a retrieved page. A missing value is correct and useful; a guessed one is harmful.
 - Prefer established financial press and official filings over blogs and aggregators.
-- Do not add commentary, headings, or any text outside the five lines.`;
+- No commentary, headings, or any text outside that single line.`;
 }
 
 export function parseFacts(text: string): RetrievedFact[] {
@@ -158,81 +176,101 @@ function extractConsulted(
 /**
  * Retrieval runs *alongside* generation rather than before it, because the
  * UI renders these facts directly from the stored note — the model never
- * needs to see them. That makes the analysis cost max(search, generation)
- * instead of the sum, which is what allows a realistic search budget.
+ * needs to see them. The analysis therefore costs max(search, generation)
+ * rather than the sum.
  *
- * Five fields need several searches; an earlier 45s cap starved it and it
- * silently returned nothing. The budget below sits comfortably under
- * typical generation time, so retrieval is effectively free.
+ * Per-field timeout, not a shared one: the fields run concurrently, so the
+ * set finishes in roughly the time of the slowest question.
  */
-const SEARCH_BUDGET_MS = 100_000;
-const MAX_SEARCHES = 6;
+const FIELD_TIMEOUT_MS = 60_000;
+/** Each question needs a search or two; more than this means it isn't there. */
+const MAX_SEARCHES_PER_FIELD = 3;
 
-export async function retrievePublicFacts(
+const notFound = (field: RetrievedField): RetrievedFact => ({
+  field,
+  value: "Not found",
+  url: null,
+  domain: null,
+  tier: null,
+  note: null,
+});
+
+async function retrieveField(
+  client: Anthropic,
   ticker: string,
-  companyName: string
-): Promise<RetrievalResult | null> {
-  // maxRetries 0: the SDK otherwise retries timeouts, multiplying the budget
-  // below by three and blowing the platform's request ceiling.
-  const client = new Anthropic({ apiKey: config.anthropicApiKey, maxRetries: 0 });
-  const deadline = Date.now() + SEARCH_BUDGET_MS;
-  const remaining = () => Math.max(1_000, deadline - Date.now());
-
-  const request = {
-    model: config.anthropicModel,
-    max_tokens: 4096,
-    tools: [
-      {
-        type: "web_search_20260209" as const,
-        name: "web_search" as const,
-        max_uses: MAX_SEARCHES,
-        blocked_domains: blockedDomains(),
-      },
-    ],
-  };
-
+  companyName: string,
+  field: RetrievedField
+): Promise<{ fact: RetrievedFact; consulted: RetrievalResult["consulted"] }> {
   try {
-    let response = await client.messages.create(
+    const response = await client.messages.create(
       {
-        ...request,
-        messages: [{ role: "user", content: buildPrompt(ticker, companyName) }],
+        model: config.anthropicModel,
+        max_tokens: 1024,
+        tools: [
+          {
+            type: "web_search_20260209",
+            name: "web_search",
+            max_uses: MAX_SEARCHES_PER_FIELD,
+            blocked_domains: blockedDomains(),
+          },
+        ],
+        messages: [
+          { role: "user", content: buildFieldPrompt(ticker, companyName, field) },
+        ],
       },
-      { timeout: remaining() }
+      { timeout: FIELD_TIMEOUT_MS }
     );
 
-    // Server-side tool loops can pause; resume only while budget remains.
-    const messages: Anthropic.Messages.MessageParam[] = [
-      { role: "user", content: buildPrompt(ticker, companyName) },
-    ];
-    let guard = 0;
-    while (
-      response.stop_reason === "pause_turn" &&
-      guard++ < 2 &&
-      Date.now() < deadline
-    ) {
-      messages.push({ role: "assistant", content: response.content });
-      response = await client.messages.create(
-        { ...request, messages },
-        { timeout: remaining() }
-      );
+    if (response.stop_reason === "refusal") {
+      return { fact: notFound(field), consulted: [] };
     }
-
-    if (response.stop_reason === "refusal") return null;
 
     const text = response.content
       .filter((b): b is Anthropic.Messages.TextBlock => b.type === "text")
       .map((b) => b.text)
       .join("\n");
-    if (!text.trim()) return null;
 
+    // parseFacts returns every field; keep only the one asked for, so a
+    // stray line about another field can't leak in unattributed.
+    const parsed = parseFacts(text).find((f) => f.field === field);
     return {
-      facts: parseFacts(text),
+      fact: parsed ?? notFound(field),
       consulted: extractConsulted(response.content),
-      searchedAt: new Date().toISOString(),
     };
   } catch {
-    return null;
+    // One field failing must not lose the others.
+    return { fact: notFound(field), consulted: [] };
   }
+}
+
+export async function retrievePublicFacts(
+  ticker: string,
+  companyName: string
+): Promise<RetrievalResult | null> {
+  // maxRetries 0: the SDK otherwise retries timeouts, tripling the budget.
+  const client = new Anthropic({ apiKey: config.anthropicApiKey, maxRetries: 0 });
+
+  const results = await Promise.all(
+    FIELDS.map((field) => retrieveField(client, ticker, companyName, field))
+  );
+
+  const consulted = new Map<string, RetrievalResult["consulted"][number]>();
+  for (const r of results) {
+    for (const page of r.consulted) {
+      if (!consulted.has(page.url)) consulted.set(page.url, page);
+    }
+  }
+
+  const facts = results.map((r) => r.fact);
+  // Nothing sourced at all is indistinguishable from not having searched;
+  // report null so the UI falls back rather than showing an empty result.
+  if (facts.every((f) => f.url === null)) return null;
+
+  return {
+    facts,
+    consulted: [...consulted.values()],
+    searchedAt: new Date().toISOString(),
+  };
 }
 
 /** Only facts that were actually found, for prompt injection. */
