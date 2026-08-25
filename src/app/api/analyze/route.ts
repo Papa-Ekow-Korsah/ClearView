@@ -116,10 +116,18 @@ export async function POST(request: NextRequest) {
       currency: profile.currency ?? null,
     };
 
-    // 2. Peer data, plus web retrieval of facts with no feed (consensus,
-    //    ratings, targets). Both need the profile, so they run together.
+    // 2. Peer data. Web retrieval is kicked off here but deliberately NOT
+    //    awaited yet — it runs concurrently with generation below, since the
+    //    UI renders retrieved facts straight from the note and the model
+    //    never needs them. Awaiting it here would make the analysis cost
+    //    search + generation instead of the larger of the two.
+    const retrievalPromise = retrievePublicFacts(
+      ticker,
+      profile.name ?? ticker
+    ).catch(() => null);
+
     const peerTickers = selectPeers(ticker, peerSymbols);
-    const [peerData, retrieved] = await Promise.all([
+    const [peerData] = await Promise.all([
       Promise.all(
       peerTickers.map(async (pt) => {
         try {
@@ -143,7 +151,6 @@ export async function POST(request: NextRequest) {
         }
       })
       ),
-      retrievePublicFacts(ticker, profile.name ?? ticker).catch(() => null),
     ]);
     const livePeers = peerData.filter((p): p is NonNullable<typeof p> => p !== null);
 
@@ -162,8 +169,12 @@ export async function POST(request: NextRequest) {
       livePeers.map((p) => ({ ticker: p.ticker, metrics: p.metrics }))
     );
 
-    // 4. AI six-section note (both voices)
-    const ai = await generateAiNoteV2({
+    // 4. AI six-section note (both voices), concurrent with retrieval.
+    //    The model is told there are no retrieved facts so it never claims a
+    //    consensus figure it hasn't seen; the sourced values are rendered
+    //    from note.retrieved instead, with their citations.
+    const [ai, retrieved] = await Promise.all([
+      generateAiNoteV2({
       ticker,
       companyName: profile.name ?? ticker,
       industry: profile.finnhubIndustry ?? null,
@@ -179,9 +190,11 @@ export async function POST(request: NextRequest) {
       })),
       secFinancials,
       earningsRelease,
-      retrieved,
+      retrieved: null,
       news,
-    });
+      }),
+      retrievalPromise,
+    ]);
 
     const note: ResearchNoteV2 = {
       formatVersion: 2,

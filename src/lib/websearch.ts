@@ -156,13 +156,17 @@ function extractConsulted(
  * affected fields unsourced rather than filling them from memory.
  */
 /**
- * Retrieval runs before generation, so its cost is additive to an analysis
- * that already takes ~100s against a hard platform timeout. It is strictly
- * budgeted: exceeding the budget abandons retrieval rather than failing the
- * whole analysis, and the affected fields simply report as not found.
+ * Retrieval runs *alongside* generation rather than before it, because the
+ * UI renders these facts directly from the stored note — the model never
+ * needs to see them. That makes the analysis cost max(search, generation)
+ * instead of the sum, which is what allows a realistic search budget.
+ *
+ * Five fields need several searches; an earlier 45s cap starved it and it
+ * silently returned nothing. The budget below sits comfortably under
+ * typical generation time, so retrieval is effectively free.
  */
-const SEARCH_BUDGET_MS = 45_000;
-const MAX_SEARCHES = 4;
+const SEARCH_BUDGET_MS = 120_000;
+const MAX_SEARCHES = 6;
 
 export async function retrievePublicFacts(
   ticker: string,
