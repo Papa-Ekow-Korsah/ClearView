@@ -237,6 +237,16 @@ const SECTION_TIMEOUT_MS = 100_000;
 /** One retry, not two: the whole analysis shares a hard request deadline. */
 const MAX_SECTION_ATTEMPTS = 2;
 
+/**
+ * The SDK retries timed-out requests on its own (default 2), which silently
+ * multiplies any timeout we set: a 100s limit became 100s x 3 = the platform's
+ * exact 300s ceiling, producing FUNCTION_INVOCATION_TIMEOUT. Retries are
+ * handled explicitly above instead, where the attempt budget is visible.
+ */
+function makeClient(): Anthropic {
+  return new Anthropic({ apiKey: config.anthropicApiKey, maxRetries: 0 });
+}
+
 async function generateSectionOnce<S extends z.ZodType>(
   client: Anthropic,
   basePrompt: string,
@@ -262,6 +272,11 @@ async function generateSectionOnce<S extends z.ZodType>(
     );
     response = await stream.finalMessage();
   } catch (err) {
+    // A slow section is worth one more attempt; with SDK retries disabled
+    // two attempts stay inside the request budget.
+    if (err instanceof Anthropic.APIConnectionTimeoutError) {
+      throw new SectionRetryable("section timed out");
+    }
     // The SDK parses the constrained output inside finalMessage() and throws
     // here if it was truncated into invalid JSON. Real API failures (auth,
     // rate limit) must propagate; a parse failure is retryable.
@@ -319,7 +334,7 @@ async function generateSection<S extends z.ZodType>(
 
 /** Generate the six-tab rich note via five parallel structured calls. */
 export async function generateAiNoteV2(input: NoteInputV2): Promise<AiNoteV2> {
-  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  const client = makeClient();
   const base = buildPrompt(input);
 
   try {

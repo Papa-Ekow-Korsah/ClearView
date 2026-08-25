@@ -165,14 +165,16 @@ function extractConsulted(
  * silently returned nothing. The budget below sits comfortably under
  * typical generation time, so retrieval is effectively free.
  */
-const SEARCH_BUDGET_MS = 120_000;
+const SEARCH_BUDGET_MS = 100_000;
 const MAX_SEARCHES = 6;
 
 export async function retrievePublicFacts(
   ticker: string,
   companyName: string
 ): Promise<RetrievalResult | null> {
-  const client = new Anthropic({ apiKey: config.anthropicApiKey });
+  // maxRetries 0: the SDK otherwise retries timeouts, multiplying the budget
+  // below by three and blowing the platform's request ceiling.
+  const client = new Anthropic({ apiKey: config.anthropicApiKey, maxRetries: 0 });
   const deadline = Date.now() + SEARCH_BUDGET_MS;
   const remaining = () => Math.max(1_000, deadline - Date.now());
 
