@@ -38,12 +38,30 @@ describe("assessSource", () => {
     expect(assessSource("https://www.businesswire.com/news/x").tier).toBe("established");
   });
 
-  it("flags contributor platforms and algorithmic sites as caution", () => {
+  it("treats data aggregators as their own tier, not as doubtful sources", () => {
+    // These carry the consensus data that barely appears in the editorial
+    // press, so collapsing them into caution would fire the warning on
+    // almost every citation and make it meaningless.
+    for (const u of [
+      "https://stockanalysis.com/stocks/mrvl/forecast/",
+      "https://www.marketbeat.com/stocks/NASDAQ/MRVL/",
+      "https://www.investing.com/equities/marvell",
+      "https://www.tipranks.com/stocks/mrvl/forecast",
+      "https://simplywall.st/stocks/x",
+      "https://www.benzinga.com/x",
+    ]) {
+      expect(assessSource(u).tier, u).toBe("aggregator");
+    }
+  });
+
+  it("explains that an aggregator is a secondary source", () => {
+    expect(assessSource("https://stockanalysis.com/x").note).toMatch(/secondary source/i);
+  });
+
+  it("keeps contributor and promotional platforms at caution", () => {
     for (const u of [
       "https://seekingalpha.com/article/x",
       "https://www.fool.com/investing/x",
-      "https://simplywall.st/stocks/x",
-      "https://www.benzinga.com/x",
     ]) {
       expect(assessSource(u).tier, u).toBe("caution");
     }
@@ -92,6 +110,15 @@ describe("weakestTier", () => {
     expect(weakestTier(["https://sec.gov/a", "https://reuters.com/b"])).toBe("established");
     expect(weakestTier(["https://reuters.com/b", "https://unknown.test/c"])).toBe("caution");
     expect(weakestTier(["https://sec.gov/a"])).toBe("primary");
+  });
+
+  it("ranks an aggregator below the press but above an unknown domain", () => {
+    expect(weakestTier(["https://reuters.com/a", "https://stockanalysis.com/b"])).toBe(
+      "aggregator"
+    );
+    expect(
+      weakestTier(["https://stockanalysis.com/b", "https://unknown.test/c"])
+    ).toBe("caution");
   });
 
   it("treats an empty set as primary so it never invents a warning", () => {

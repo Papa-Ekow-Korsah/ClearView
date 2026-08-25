@@ -12,7 +12,7 @@
  * assumed onto it.
  */
 
-export type SourceTier = "primary" | "established" | "caution";
+export type SourceTier = "primary" | "established" | "aggregator" | "caution";
 
 /** Official and regulatory publishers — the document itself. */
 const PRIMARY = [
@@ -57,6 +57,38 @@ const ESTABLISHED = [
   "finance.yahoo.com",
   "sp-global.com",
   "spglobal.com",
+];
+
+/**
+ * Data aggregators: they compile market data and analyst estimates from
+ * primary providers, but do no editorial reporting of their own and carry no
+ * corrections policy.
+ *
+ * This tier exists because of what the data actually looks like. Analyst
+ * consensus barely appears in the editorial press — a live MRVL retrieval
+ * consulted fifteen pages and only two were established outlets. Lumping
+ * these in with unknown blogs made the caution flag fire on almost every
+ * citation, which trains the reader to ignore it. Separating them keeps the
+ * warning meaningful for sources that genuinely warrant one.
+ */
+const AGGREGATOR = [
+  "stockanalysis.com",
+  "marketbeat.com",
+  "investing.com",
+  "tipranks.com",
+  "zacks.com",
+  "finviz.com",
+  "public.com",
+  "wallstreetzen.com",
+  "stockinvest.us",
+  "simplywall.st",
+  "benzinga.com",
+  "tradingview.com",
+  "gurufocus.com",
+  "macrotrends.net",
+  "barchart.com",
+  "stockopedia.com",
+  "koyfin.com",
 ];
 
 /**
@@ -116,10 +148,17 @@ export function assessSource(url: string): SourceAssessment {
       note: "Established financial press or newswire with editorial standards.",
     };
   }
+  if (matches(domain, AGGREGATOR)) {
+    return {
+      domain,
+      tier: "aggregator",
+      note: "Data aggregator — compiles figures from other providers rather than reporting them first-hand. Usually reliable for consensus data, but it is a secondary source.",
+    };
+  }
   return {
     domain,
     tier: "caution",
-    note: "Not a recognised financial publisher — treat this figure as unconfirmed and check it against the company's own reporting.",
+    note: "Not a recognised financial publisher or data provider — treat this figure as unconfirmed and check it against the company's own reporting.",
   };
 }
 
@@ -132,13 +171,20 @@ export function isBlocked(url: string): boolean {
   return matches(domainOf(url), BLOCKED);
 }
 
+/** Strongest first, so the weakest link in a set is the highest rank. */
+const TIER_RANK: Record<SourceTier, number> = {
+  primary: 0,
+  established: 1,
+  aggregator: 2,
+  caution: 3,
+};
+
 /** Weakest tier present, for summarising a set of citations. */
 export function weakestTier(urls: string[]): SourceTier {
   let weakest: SourceTier = "primary";
   for (const url of urls) {
     const { tier } = assessSource(url);
-    if (tier === "caution") return "caution";
-    if (tier === "established") weakest = "established";
+    if (TIER_RANK[tier] > TIER_RANK[weakest]) weakest = tier;
   }
   return weakest;
 }

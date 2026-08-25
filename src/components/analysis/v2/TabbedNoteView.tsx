@@ -8,6 +8,7 @@ import type {
   ResearchNoteV2,
 } from "@/types/analysis-v2";
 import { useLiveQuote, type LiveData } from "@/components/analysis/v2/useLiveQuote";
+import { assessSource } from "@/lib/source-credibility";
 
 type Mode = "explain" | "analyst";
 type TabId = "overview" | "earnings" | "ratios" | "deals" | "macro" | "verdict";
@@ -101,33 +102,35 @@ function SourcedTag({ href, label }: { href: string; label: string }) {
  * caution, because for small caps the only coverage is often weak and
  * pretending otherwise would be the dishonest option.
  */
-function SourceCite({
-  domain,
-  url,
-  tier,
-  note,
-}: {
-  domain: string | null;
-  url: string | null;
-  tier: "primary" | "established" | "caution" | null;
-  note: string | null;
-}) {
-  if (!url || !domain) return null;
-  const caution = tier === "caution";
+function SourceCite({ url }: { url: string | null }) {
+  // Classified at render rather than read from the stored note, so improving
+  // the tiering reclassifies every existing note instead of only new ones.
+  if (!url) return null;
+  const { domain, tier, note } = assessSource(url);
+  if (!domain) return null;
+
+  // Three treatments, not two. Aggregators are secondary sources rather than
+  // doubtful ones, so they read as informative; the amber warning is kept
+  // for sources that genuinely warrant scepticism, which is what stops it
+  // becoming background noise.
+  const style =
+    tier === "caution"
+      ? "bg-warn-bg text-warn font-medium"
+      : "bg-surface-2 text-ink-3";
+  const prefix =
+    tier === "caution" ? "⚠ unverified source: " : tier === "aggregator" ? "via " : "";
+
   return (
     <a
       href={url}
       target="_blank"
       rel="noopener noreferrer"
-      title={note ?? undefined}
-      className={`inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 hover:underline ${
-        caution
-          ? "bg-warn-bg text-warn font-medium"
-          : "bg-surface-2 text-ink-3"
-      }`}
+      title={note}
+      className={`inline-flex items-center gap-1 text-[10px] rounded px-1.5 py-0.5 hover:underline ${style}`}
     >
-      {caution ? "⚠ unverified source: " : ""}
-      {domain} ↗
+      {prefix}
+      {domain}
+      {tier === "aggregator" ? " (aggregator)" : ""} ↗
     </a>
   );
 }
@@ -408,12 +411,7 @@ function OverviewTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
           <div className="bg-surface border border-line rounded-el px-3.5 py-3">
             <p className="text-[11px] text-ink-3 mb-1">Street consensus</p>
             <p className="text-[13px] font-semibold font-mono mb-1.5">{rating.value}</p>
-            <SourceCite
-              domain={rating.domain}
-              url={rating.url}
-              tier={rating.tier}
-              note={rating.note}
-            />
+            <SourceCite url={rating.url} />
           </div>
         ) : (
           <MetricCard
@@ -431,12 +429,7 @@ function OverviewTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
             <p className="text-[11px] text-ink-3 mb-0.5">Average analyst price target</p>
             <p className="text-[15px] font-semibold font-mono">{target.value}</p>
           </div>
-          <SourceCite
-            domain={target.domain}
-            url={target.url}
-            tier={target.tier}
-            note={target.note}
-          />
+          <SourceCite url={target.url} />
         </div>
       )}
 
@@ -445,12 +438,7 @@ function OverviewTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
           <SectionLabel>Recent analyst moves</SectionLabel>
           <div className="bg-surface border border-line rounded-card px-4 py-3 mb-6">
             <p className="text-[13px] text-ink-2 leading-relaxed mb-2">{moves.value}</p>
-            <SourceCite
-              domain={moves.domain}
-              url={moves.url}
-              tier={moves.tier}
-              note={moves.note}
-            />
+            <SourceCite url={moves.url} />
           </div>
         </>
       ) : (
@@ -579,12 +567,7 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
             <>
               <p className="text-[10px] text-ink-3">Est. {revConsensus.value}</p>
               <div className="mt-1">
-                <SourceCite
-                  domain={revConsensus.domain}
-                  url={revConsensus.url}
-                  tier={revConsensus.tier}
-                  note={revConsensus.note}
-                />
+                <SourceCite url={revConsensus.url} />
               </div>
             </>
           ) : (
