@@ -367,6 +367,13 @@ export async function generateAiNoteV2(input: NoteInputV2): Promise<AiNoteV2> {
       );
     }
     if (err instanceof Anthropic.APIError) {
+      // Now that analysis is open to anyone, internal billing state must not
+      // be shown to visitors — they can neither fix nor need to know it.
+      if (/credit balance is too low|billing/i.test(err.message)) {
+        throw new AnalysisGenerationError(
+          "Analysis is temporarily unavailable. Please try again later."
+        );
+      }
       throw new AnalysisGenerationError(`Anthropic API error (HTTP ${err.status}): ${err.message}`);
     }
     if (err instanceof SyntaxError) {
