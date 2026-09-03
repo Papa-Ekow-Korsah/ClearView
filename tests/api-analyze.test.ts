@@ -55,12 +55,15 @@ beforeEach(() => {
 });
 
 describe("POST /api/analyze", () => {
-  it("rejects unauthenticated callers with 401", async () => {
+  it("is open to unauthenticated callers — research needs no sign-in", async () => {
+    // requireOwner is still mocked to deny; if the route consulted it we
+    // would get a 401 instead of reaching input validation.
     mocks.requireOwner.mockResolvedValue(
       NextResponse.json({ error: "Sign in required." }, { status: 401 })
     );
-    const res = await POST(request({ ticker: "AAPL" }));
-    expect(res.status).toBe(401);
+    const res = await POST(request({ ticker: "not-a-ticker" }));
+    expect(res.status).toBe(400);
+    expect(mocks.requireOwner).not.toHaveBeenCalled();
   });
 
   it("rejects malformed tickers with 400", async () => {

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireOwner } from "@/lib/auth/guard";
 import { checkRateLimit, ANALYZE_LIMIT } from "@/lib/rate-limit";
 import {
   getQuote,
@@ -28,9 +27,9 @@ import type { ResearchNoteV2 } from "@/types/analysis-v2";
 export const maxDuration = 300; // six-section generation takes 1-3 minutes
 
 export async function POST(request: NextRequest) {
-  const denied = await requireOwner();
-  if (denied) return denied;
-
+  // Open to everyone: running an analysis no longer needs the owner session.
+  // Spend stays bounded by the rate limit below, which is global rather than
+  // per-caller, so it caps total generations regardless of who asks.
   let rawTicker: string;
   try {
     const body = await request.json();

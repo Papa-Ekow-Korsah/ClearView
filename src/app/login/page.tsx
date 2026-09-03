@@ -44,15 +44,15 @@ function LoginForm() {
             Clear<span className="text-accent">View</span>
           </div>
           <p className="text-sm text-ink-2">
-            Owner sign-in. Visitors can browse{" "}
-            <Link href="/history" className="text-accent hover:underline">
-              published research
+            Owner sign-in, needed only for the watchlist. Anyone can{" "}
+            <Link href="/" className="text-accent hover:underline">
+              research a ticker
             </Link>{" "}
-            or read{" "}
-            <Link href="/about" className="text-accent hover:underline">
-              about the project
-            </Link>
-            .
+            or read the{" "}
+            <Link href="/history" className="text-accent hover:underline">
+              archive
+            </Link>{" "}
+            without signing in.
           </p>
         </div>
 

@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySessionToken, SESSION_COOKIE } from "@/lib/auth/token";
 
 /**
- * Page-level gating. Logged-out visitors can read /about, /history and
- * /analysis/[ticker]; everything that spends API quota or mutates state
- * requires the owner session. API routes enforce auth themselves — this
- * proxy only handles page redirects.
+ * Page-level gating. Research is open to everyone: anyone can land on the
+ * search page, run an analysis and read the archive. The owner session is
+ * still required for the personal watchlist and for deleting notes, since
+ * neither is part of looking up a stock. API routes enforce auth
+ * themselves — this proxy only handles page redirects.
  */
 const PROTECTED_PAGES = ["/watchlist"];
 
@@ -16,12 +17,6 @@ export async function proxy(request: NextRequest) {
     token,
     process.env.SESSION_SECRET ?? ""
   );
-
-  // Root: owner gets the research dashboard; visitors get sent to history,
-  // which is the public read-only face of the app.
-  if (pathname === "/" && !authed) {
-    return NextResponse.redirect(new URL("/history", request.url));
-  }
 
   if (PROTECTED_PAGES.some((p) => pathname.startsWith(p)) && !authed) {
     const login = new URL("/login", request.url);

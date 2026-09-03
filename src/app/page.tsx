@@ -17,8 +17,7 @@ export default async function ResearchHome({
         Get the full picture.
       </h1>
       <p className="text-[15px] text-ink-2 text-center max-w-[440px] leading-relaxed mb-9">
-        Thesis, catalysts, risks, and peer comparables — real fundamentals from
-        Finnhub, narrative written by Claude.
+        Thesis, catalysts, risks, and peer comparables.
       </p>
       <TickerSearch initialTicker={ticker ?? ""} />
     </main>

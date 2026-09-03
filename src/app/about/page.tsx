@@ -87,12 +87,11 @@ export default function AboutPage() {
             from Yahoo Finance.
           </p>
           <p>
-            Anyone can read the{" "}
+            Anyone can research a ticker and read the{" "}
             <Link href="/history" className="text-accent hover:underline">
-              research archive
+              archive
             </Link>
-            ; generating new analyses and editing the watchlist requires the
-            owner login.
+            . The personal watchlist is the one owner-only part.
           </p>
         </Section>
 
