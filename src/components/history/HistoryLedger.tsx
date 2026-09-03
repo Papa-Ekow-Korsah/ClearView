@@ -12,6 +12,7 @@ export interface LedgerRow {
   createdAt: string;
   signal: "BUY" | "HOLD" | "SELL" | null;
   verified: boolean;
+  isFund?: boolean;
 }
 
 const SIGNAL_CHIP: Record<string, string> = {
@@ -92,6 +93,14 @@ export function HistoryLedger({
                     className="text-[9px] font-semibold uppercase tracking-wide text-teal bg-teal-bg rounded px-1.5 py-0.5 shrink-0 hidden md:inline"
                   >
                     ✓ SEC
+                  </span>
+                )}
+                {row.isFund && (
+                  <span
+                    title="Exchange-traded fund — judged on holdings, cost and computed performance rather than company financials"
+                    className="text-[9px] font-semibold uppercase tracking-wide text-accent bg-accent-dim rounded px-1.5 py-0.5 shrink-0 hidden md:inline"
+                  >
+                    ETF
                   </span>
                 )}
 

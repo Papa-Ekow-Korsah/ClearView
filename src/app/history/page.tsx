@@ -8,6 +8,7 @@ import {
 } from "@/components/history/HistoryLedger";
 import type { ResearchNote } from "@/types/analysis";
 import type { ResearchNoteV2 } from "@/types/analysis-v2";
+import type { ResearchNoteEtf } from "@/types/analysis-etf";
 
 export const metadata: Metadata = { title: "Research history | ClearView" };
 
@@ -29,16 +30,20 @@ export default async function HistoryPage({
   const tickers = [...new Set(allRows.map((r) => r.ticker))].sort();
 
   const ledgerRows: LedgerRow[] = rows.map((r) => {
-    const note = r.note as ResearchNote | ResearchNoteV2;
-    const isV2 = "formatVersion" in note && note.formatVersion === 2;
-    const v2 = isV2 ? (note as ResearchNoteV2) : null;
+    const note = r.note as ResearchNote | ResearchNoteV2 | ResearchNoteEtf;
+    const version = "formatVersion" in note ? note.formatVersion : 1;
+    const v2 = version === 2 ? (note as ResearchNoteV2) : null;
+    const etf = version === 3 ? (note as ResearchNoteEtf) : null;
     return {
       id: r.id,
       ticker: r.ticker,
       companyName: r.companyName,
       createdAt: r.createdAt.toISOString(),
-      signal: v2?.ai?.signal ?? null,
+      signal: v2?.ai?.signal ?? etf?.ai?.signal ?? null,
+      // The badge means "backed by SEC filings", which a fund never is —
+      // its verification is computed performance, shown on its own page.
       verified: v2?.secFinancials != null,
+      isFund: etf !== null,
     };
   });
 

@@ -27,7 +27,13 @@ export type RetrievedField =
   | "ANALYST_RATING"
   | "PRICE_TARGET"
   | "RECENT_MOVES"
-  | "GUIDANCE";
+  | "GUIDANCE"
+  // Fund fields. Finnhub paywalls all of these, so retrieval with a citation
+  // is the only honest route to them.
+  | "EXPENSE_RATIO"
+  | "FUND_AUM"
+  | "TOP_HOLDINGS"
+  | "INDEX_TRACKED";
 
 export interface RetrievedFact {
   field: RetrievedField;
@@ -46,13 +52,23 @@ export interface RetrievalResult {
   searchedAt: string;
 }
 
-const FIELDS: RetrievedField[] = [
+const COMPANY_FIELDS: RetrievedField[] = [
   "REVENUE_CONSENSUS",
   "ANALYST_RATING",
   "PRICE_TARGET",
   "RECENT_MOVES",
   "GUIDANCE",
 ];
+
+const FUND_FIELDS: RetrievedField[] = [
+  "EXPENSE_RATIO",
+  "FUND_AUM",
+  "TOP_HOLDINGS",
+  "INDEX_TRACKED",
+];
+
+/** Every field, for parsing; callers choose which set to retrieve. */
+const FIELDS: RetrievedField[] = [...COMPANY_FIELDS, ...FUND_FIELDS];
 
 /**
  * One question per field, asked in parallel.
@@ -73,6 +89,12 @@ const FIELD_QUESTIONS: Record<RetrievedField, string> = {
     "up to two notable analyst rating or price-target changes in the last 30 days, separated by semicolons",
   GUIDANCE:
     "management's own revenue or earnings guidance for the current or next quarter, as reported",
+  EXPENSE_RATIO: "the fund's net expense ratio (annual management fee)",
+  FUND_AUM: "the fund's total assets under management",
+  TOP_HOLDINGS:
+    "its five largest holdings with their approximate portfolio weights, comma-separated",
+  INDEX_TRACKED:
+    "the index or benchmark the fund tracks, and its stated investment objective in a few words",
 };
 
 function buildFieldPrompt(
@@ -245,13 +267,15 @@ async function retrieveField(
 
 export async function retrievePublicFacts(
   ticker: string,
-  companyName: string
+  companyName: string,
+  kind: "company" | "fund" = "company"
 ): Promise<RetrievalResult | null> {
   // maxRetries 0: the SDK otherwise retries timeouts, tripling the budget.
   const client = new Anthropic({ apiKey: config.anthropicApiKey, maxRetries: 0 });
+  const wanted = kind === "fund" ? FUND_FIELDS : COMPANY_FIELDS;
 
   const results = await Promise.all(
-    FIELDS.map((field) => retrieveField(client, ticker, companyName, field))
+    wanted.map((field) => retrieveField(client, ticker, companyName, field))
   );
 
   const consulted = new Map<string, RetrievalResult["consulted"][number]>();

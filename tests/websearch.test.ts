@@ -51,10 +51,34 @@ describe("parseFacts", () => {
     expect(f.tier).toBeNull();
   });
 
-  it("always returns every field, defaulting missing ones to not found", () => {
+  it("always returns every known field, defaulting missing ones to not found", () => {
     const facts = parseFacts("REVENUE_CONSENSUS | $1B | https://reuters.com/x");
-    expect(facts).toHaveLength(5);
-    expect(facts.filter((f) => f.value === "Not found")).toHaveLength(4);
+    // Company and fund fields both parse; callers pick which set to retrieve.
+    expect(facts.map((f) => f.field)).toEqual(
+      expect.arrayContaining([
+        "REVENUE_CONSENSUS",
+        "ANALYST_RATING",
+        "PRICE_TARGET",
+        "RECENT_MOVES",
+        "GUIDANCE",
+        "EXPENSE_RATIO",
+        "FUND_AUM",
+        "TOP_HOLDINGS",
+        "INDEX_TRACKED",
+      ])
+    );
+    // Only the one supplied has a value; everything else is honestly absent.
+    expect(facts.filter((f) => f.url !== null)).toHaveLength(1);
+    expect(facts.every((f) => f.url !== null || f.value === "Not found")).toBe(true);
+  });
+
+  it("parses fund fields with their sources", () => {
+    const f = get(
+      "EXPENSE_RATIO | 0.09% | https://www.ssga.com/us/en/intermediary/etfs/spy",
+      "EXPENSE_RATIO"
+    );
+    expect(f.value).toBe("0.09%");
+    expect(f.domain).toBe("ssga.com");
   });
 
   it("ignores commentary the model adds around the lines", () => {
@@ -82,7 +106,9 @@ describe("parseFacts", () => {
   });
 
   it("ignores unknown field names", () => {
-    expect(parseFacts("MADE_UP_FIELD | x | https://reuters.com/y")).toHaveLength(5);
+    const facts = parseFacts("MADE_UP_FIELD | x | https://reuters.com/y");
+    expect(facts.some((f) => f.field === ("MADE_UP_FIELD" as never))).toBe(false);
+    expect(facts.every((f) => f.value === "Not found")).toBe(true);
   });
 });
 

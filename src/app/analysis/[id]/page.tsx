@@ -3,8 +3,10 @@ import type { Metadata } from "next";
 import { getAnalysisById } from "@/lib/db/queries";
 import { NoteView } from "@/components/analysis/NoteView";
 import { TabbedNoteView } from "@/components/analysis/v2/TabbedNoteView";
+import { EtfNoteView } from "@/components/analysis/etf/EtfNoteView";
 import type { ResearchNote } from "@/types/analysis";
 import type { ResearchNoteV2 } from "@/types/analysis-v2";
+import type { ResearchNoteEtf } from "@/types/analysis-etf";
 
 interface Props {
   params: Promise<{ id: string }>;
@@ -31,11 +33,13 @@ export default async function AnalysisPage({ params }: Props) {
   if (!row) notFound();
 
   const note = row.note;
-  const isV2 = "formatVersion" in note && note.formatVersion === 2;
+  const version = "formatVersion" in note ? note.formatVersion : 1;
 
   return (
     <main className="flex-1 flex flex-col">
-      {isV2 ? (
+      {version === 3 ? (
+        <EtfNoteView note={note as ResearchNoteEtf} />
+      ) : version === 2 ? (
         <TabbedNoteView note={note as ResearchNoteV2} />
       ) : (
         <NoteView note={note as ResearchNote} />

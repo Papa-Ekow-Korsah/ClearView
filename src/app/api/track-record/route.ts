@@ -12,6 +12,7 @@ import {
 } from "@/lib/track-record";
 import type { ResearchNote } from "@/types/analysis";
 import type { ResearchNoteV2 } from "@/types/analysis-v2";
+import type { ResearchNoteEtf } from "@/types/analysis-etf";
 
 /**
  * The accountability ledger: every call ever generated, scored against the
@@ -21,24 +22,28 @@ import type { ResearchNoteV2 } from "@/types/analysis-v2";
 export async function GET() {
   const rows = await listAllCalls();
 
-  // Only v2 notes carry a signal; v1 notes predate it and aren't scoreable.
+  // v1 notes predate signals and aren't scoreable. Company (v2) and fund (v3)
+  // notes both carry a signal, conviction and entry price, so a call on a
+  // fund is held to exactly the same standard as one on a company.
   const calls: Call[] = [];
   for (const row of rows) {
-    const note = row.note as ResearchNote | ResearchNoteV2;
-    if (!("formatVersion" in note) || note.formatVersion !== 2) continue;
-    const v2 = note as ResearchNoteV2;
-    const entryPrice = v2.snapshot?.price;
+    const note = row.note as ResearchNote | ResearchNoteV2 | ResearchNoteEtf;
+    const version = "formatVersion" in note ? note.formatVersion : 1;
+    if (version !== 2 && version !== 3) continue;
+
+    const scored = note as ResearchNoteV2 | ResearchNoteEtf;
+    const entryPrice = scored.snapshot?.price;
     if (typeof entryPrice !== "number" || !Number.isFinite(entryPrice)) continue;
 
     calls.push({
       id: row.id,
       ticker: row.ticker,
       companyName: row.companyName,
-      signal: v2.ai.signal as Signal,
-      conviction: v2.ai.conviction as Conviction,
-      generatedAt: v2.generatedAt ?? row.createdAt.toISOString(),
+      signal: scored.ai.signal as Signal,
+      conviction: scored.ai.conviction as Conviction,
+      generatedAt: scored.generatedAt ?? row.createdAt.toISOString(),
       entryPrice,
-      verified: v2.secFinancials != null,
+      verified: version === 2 && (scored as ResearchNoteV2).secFinancials != null,
       deleted: row.deletedAt != null,
     });
   }

@@ -14,6 +14,10 @@ import {
 import { extractSecFinancials } from "@/lib/sec";
 import { getLatestEarningsRelease } from "@/lib/edgar";
 import { retrievePublicFacts } from "@/lib/websearch";
+import { classifySecurity, buildEtfSnapshot } from "@/lib/etf";
+import { generateEtfNote } from "@/lib/anthropic-etf";
+import type { ResearchNoteEtf } from "@/types/analysis-etf";
+import type { NewsItem } from "@/lib/finnhub";
 import { validateTicker } from "@/lib/ticker";
 import { selectPeers, buildPeerRow, orderRows } from "@/lib/peers";
 import { buildRatioValues } from "@/lib/ratios";
@@ -96,18 +100,17 @@ export async function POST(request: NextRequest) {
       : null;
 
     if (isUnknownTicker(profile)) {
-      // An empty company profile alongside a live quote means a real,
-      // tradeable security that simply isn't an operating company — in
-      // practice an ETF or fund. A genuine typo quotes at zero. Saying
-      // "not recognised" for a fund would be false: the data source knows
-      // the symbol perfectly well, it just has no company behind it.
+      // No company profile but a live quote means a real tradeable security
+      // with no company behind it — in practice a fund. A genuine typo
+      // quotes at zero.
       if ((quote.c ?? 0) > 0) {
-        return NextResponse.json(
-          {
-            error: `${ticker} looks like an ETF or fund rather than an operating company. ClearView analyses companies — revenue, margins, filings and guidance — and a fund has none of those to verify, so an analysis would be mostly empty or made up. Try one of its holdings instead.`,
-          },
-          { status: 400 }
-        );
+        const identity = await classifySecurity(ticker);
+        if (identity.kind === "fund") {
+          // `return await`, not a bare return: without awaiting here the
+          // promise escapes this try block and its rejection bypasses the
+          // catch below, turning a clean error into an opaque 500.
+          return await analyseFund(ticker, identity.name, news);
+        }
       }
       return NextResponse.json(
         {
@@ -263,6 +266,62 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * Fund path. Nothing in the company note applies, so this builds the ETF
+ * format instead: verified performance and risk computed from real closes,
+ * fund facts retrieved with citations, and the model writing only
+ * interpretation on top.
+ */
+async function analyseFund(
+  ticker: string,
+  name: string | null,
+  news: NewsItem[]
+): Promise<NextResponse> {
+  // Retrieval runs concurrently with generation, as on the company path.
+  const retrievalPromise = retrievePublicFacts(
+    ticker,
+    name ?? ticker,
+    "fund"
+  ).catch(() => null);
+
+  const snapshot = await buildEtfSnapshot(ticker, name);
+
+  const [ai, retrieved] = await Promise.all([
+    generateEtfNote({
+      ticker,
+      name: snapshot.name ?? ticker,
+      snapshot,
+      retrieved: null,
+      news,
+    }),
+    retrievalPromise,
+  ]);
+
+  const note: ResearchNoteEtf = {
+    formatVersion: 3,
+    securityKind: "fund",
+    ticker,
+    companyName: snapshot.name ?? ticker,
+    generatedAt: new Date().toISOString(),
+    model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
+    snapshot,
+    retrieved,
+    newsHeadlines: news.slice(0, 8).map((item) => ({
+      headline: item.headline,
+      date: new Date(item.datetime * 1000).toISOString().slice(0, 10),
+      source: item.source,
+    })),
+    ai,
+  };
+
+  const [saved] = await db()
+    .insert(analyses)
+    .values({ ticker, companyName: note.companyName, note })
+    .returning({ id: analyses.id });
+
+  return NextResponse.json({ id: saved.id, note });
 }
 
 function numMetric(
