@@ -96,6 +96,19 @@ export async function POST(request: NextRequest) {
       : null;
 
     if (isUnknownTicker(profile)) {
+      // An empty company profile alongside a live quote means a real,
+      // tradeable security that simply isn't an operating company — in
+      // practice an ETF or fund. A genuine typo quotes at zero. Saying
+      // "not recognised" for a fund would be false: the data source knows
+      // the symbol perfectly well, it just has no company behind it.
+      if ((quote.c ?? 0) > 0) {
+        return NextResponse.json(
+          {
+            error: `${ticker} looks like an ETF or fund rather than an operating company. ClearView analyses companies — revenue, margins, filings and guidance — and a fund has none of those to verify, so an analysis would be mostly empty or made up. Try one of its holdings instead.`,
+          },
+          { status: 400 }
+        );
+      }
       return NextResponse.json(
         {
           error: `Finnhub doesn't recognise "${ticker}". Check the symbol — US listings work best on the free tier.`,
