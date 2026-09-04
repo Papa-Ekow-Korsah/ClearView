@@ -1,65 +1,88 @@
-# Direct EDGAR access is blocked from Vercel
+# Direct EDGAR access
 
-**Status: blocked in production, works everywhere else. Needs a proxy.**
-Tested 2026-08-13.
+**Status: fixed locally and verified. Production unverified until deployed.**
+Originally diagnosed 2026-08-13; root cause found 2026-09-04.
 
-## What happens
+## The actual cause: a URL in the User-Agent
 
-`lib/edgar.ts` retrieves earnings press releases (8-K Item 2.02) so guidance
-figures can be extracted from the filed document instead of recalled by the
-model. It works from a residential IP and fails in production.
+SEC's edge rejects any `User-Agent` containing a URL or bare domain. Our UA
+was:
 
-SEC returns **403 "Request Rate Threshold Exceeded"** to every request from
-Vercel, in 22–96ms — far too fast to be a rate limit we caused. A diagnostic
-deployed to production probed four combinations:
+```
+ClearView personal research tool (contact via github.com/Papa-Ekow-Korsah/ClearView)
+```
 
-| Target | User-Agent | Result |
-|---|---|---|
-| `www.sec.gov/files/company_tickers.json` | descriptive, with contact URL | 403 in 96ms |
-| `www.sec.gov/files/company_tickers.json` | plain `ClearView/2.0` | 403 in 41ms |
-| `data.sec.gov/submissions/CIK...json` | descriptive | 403 in 44ms |
-| `www.sec.gov/Archives/.../index.json` | descriptive | 403 in 22ms |
+so **every EDGAR request failed, from every network** — not only from Vercel.
+Measured 2026-09-04 against `data.sec.gov/submissions/CIK0000047217.json`
+from a residential IP:
 
-Both hosts, both User-Agent styles, first request of the session. This is an
-**IP-level block on Vercel's shared egress**, not a per-caller rate limit and
-not a User-Agent policy rejection.
+| User-Agent | Result |
+|---|---|
+| `...(contact via github.com/...)` | **403** |
+| `ClearView research tool (github.com/x/y)` | **403** |
+| `ClearView research tool https://github.com/x/y` | **403** |
+| `ClearView research tool contact via github.com` | **403** |
+| `ClearView personal research tool` | **200** |
+| `ClearView Research paakorsah1@gmail.com` | **200** |
+| `ClearView` | **200** |
 
-Practical consequence: **adding a contact email to the User-Agent will not
-fix this.** SEC's developer policy does ask for one, and it is worth doing if
-we ever get unblocked, but it is not the cause here.
+The discriminator is the URL, not the presence of a contact. A plain
+descriptive name passes; a name plus an email passes and is what SEC's own
+developer guidance asks for.
+
+**Never put a URL in this header.** `lib/edgar.ts` documents this at the
+`SEC_UA` definition. Set `SEC_CONTACT_EMAIL` to append a contact address.
+
+## What the earlier diagnosis got right and wrong
+
+The 2026-08-13 production probe recorded 403s from Vercel on both hosts in
+22–96ms and concluded an IP-level block on Vercel's shared egress, adding
+that "adding a contact email to the User-Agent will not fix this."
+
+That conclusion was wrong about the cause we could control — three of its
+four probes used a UA containing a contact URL, which fails from anywhere.
+Its fourth probe used `ClearView/2.0`, which contains no URL and still 403'd,
+so an IP-level block on Vercel may *also* have been real at that time.
+
+**Therefore: local access is now proven working; production is not yet
+proven.** Re-run a real analysis in production after deploying and check
+whether `guidanceSource` is non-null in the stored note. If it is still null
+there, the Vercel egress block is genuine and separate, and the proxy options
+below apply.
+
+## What now works (verified locally, 2026-09-04)
+
+Verified against live filings:
+
+- `getRecentEarningsReleases("HPQ", 2)` returns the 8-Ks filed 2026-08-26 and
+  2026-05-27 with full press-release text.
+- Guidance is extracted from the filing rather than recalled: HPQ Q4 FY2026
+  EPS guidance of `$0.74 to $0.84` (GAAP) came out of the document, and
+  revenue range is honestly `Not disclosed` because HP doesn't guide revenue.
+- The guidance-delivery scorecard scores the prior release's promise against
+  the latest release's result. HPQ: GAAP EPS guided `$0.47 to $0.63`,
+  delivered `$0.71` — beat.
+- AAPL returns an empty scorecard with an explanation, because Apple states
+  no numeric guidance in its press release. This is the correct outcome, not
+  a failure.
 
 ## Why Finnhub-sourced SEC data still works
 
 The verified balance sheet, margins and cash flow come from Finnhub's
 `financials-reported` endpoint, which fetches EDGAR from *their*
-infrastructure. Only our direct document fetches are affected.
+infrastructure. It was never affected.
 
-## Current behaviour (safe)
+## Fallbacks if production is still blocked
 
-`getLatestEarningsRelease()` returns null, `guidanceSource` is stored as
-null, and the prompt instructs the model to write **"Not disclosed"** for
-every guidance figure rather than substitute a remembered value. Verified in
-production: a CROX analysis returned `Not disclosed` for revenue range, EPS
-and gross margin.
+1. **Cloudflare Worker proxy** (free tier, ~20 lines). Unverified — Cloudflare
+   egress may also be blocked. Requires a Cloudflare account.
+2. **Pre-cache from an unblocked machine** into Postgres; production reads the
+   cache. Manual, and only covers tickers fetched ahead of time.
+3. **Leave it.** The web-search `GUIDANCE` field now renders as a cited
+   fallback when the filing can't be reached, so production degrades to a
+   sourced third-party figure rather than to nothing.
 
-This is a real improvement over the previous behaviour even while blocked —
-the app no longer invents guidance. It just doesn't yet show any.
-
-Why that matters: two AI-recalled CROX runs six weeks apart produced
-**$1.19B–$1.22B** and **$1.10B–$1.14B** for the same quarter's guidance.
-Same company, same question, different fabricated numbers.
-
-## Options to unblock
-
-1. **Cloudflare Worker proxy** (free tier, ~20 lines). Route SEC requests
-   through it. Unverified — Cloudflare egress may also be blocked; would take
-   about ten minutes to find out. Requires a Cloudflare account.
-2. **Pre-cache from an unblocked machine.** A script run locally fetches
-   filings for watchlist tickers into Postgres; production reads the cache.
-   No new account, but it is manual and only covers tickers fetched ahead of
-   time.
-3. **Different host for the app.** Disproportionate for one feature.
-4. **Leave it.** Guidance shows "Not disclosed" in production. Safe, honest,
-   and loses a genuinely useful field.
-
-Option 1 first, falling back to option 2, is the recommended order.
+Even while blocked the app never invented guidance — the prompt forces
+"Not disclosed". That mattered: two AI-recalled CROX runs six weeks apart
+produced **$1.19B–$1.22B** and **$1.10B–$1.14B** for the same quarter. Same
+company, same question, different fabricated numbers.

@@ -12,7 +12,7 @@ import {
   FinnhubError,
 } from "@/lib/finnhub";
 import { extractSecFinancials } from "@/lib/sec";
-import { getLatestEarningsRelease } from "@/lib/edgar";
+import { getRecentEarningsReleases } from "@/lib/edgar";
 import { retrievePublicFacts } from "@/lib/websearch";
 import { classifySecurity, buildEtfSnapshot } from "@/lib/etf";
 import { generateEtfNote } from "@/lib/anthropic-etf";
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
       news,
       epsSurprises,
       reported,
-      earningsRelease,
+      earningsReleases,
     ] = await Promise.all([
         getProfile(ticker),
         getQuote(ticker),
@@ -90,9 +90,13 @@ export async function POST(request: NextRequest) {
           .catch(() => ({ ok: false as const, data: null })),
         // Guidance isn't in any affordable feed, but it's stated verbatim in
         // the 8-K earnings release — retrieve it so the model extracts rather
-        // than recalls.
-        getLatestEarningsRelease(ticker).catch(() => null),
+        // than recalls. Two releases: the latest reports what was delivered,
+        // the one before it stated what was promised for that same quarter,
+        // which is what makes the delivery scorecard checkable.
+        getRecentEarningsReleases(ticker, 2).catch(() => []),
       ]);
+
+    const [earningsRelease = null, priorEarningsRelease = null] = earningsReleases;
 
     const secLookupFailed = !reported.ok;
     const secFinancials = reported.data
@@ -205,6 +209,7 @@ export async function POST(request: NextRequest) {
       })),
       secFinancials,
       earningsRelease,
+      priorEarningsRelease,
       retrieved: null,
       news,
       }),
@@ -233,6 +238,13 @@ export async function POST(request: NextRequest) {
             url: earningsRelease.url,
             filedDate: earningsRelease.filedDate,
             form: earningsRelease.form,
+          }
+        : null,
+      priorGuidanceSource: priorEarningsRelease
+        ? {
+            url: priorEarningsRelease.url,
+            filedDate: priorEarningsRelease.filedDate,
+            form: priorEarningsRelease.form,
           }
         : null,
       retrieved,

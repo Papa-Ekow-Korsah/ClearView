@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { htmlToText, pickPressRelease } from "@/lib/edgar";
+import { guidanceExcerpt, htmlToText, pickPressRelease } from "@/lib/edgar";
 
 // Filenames below are the real ones observed on EDGAR for these filings.
 describe("pickPressRelease", () => {
@@ -65,5 +65,38 @@ describe("htmlToText", () => {
 
   it("collapses the whitespace that filings are full of", () => {
     expect(htmlToText("<p>A</p>\n\n\n   <p>B</p>")).toBe("A B");
+  });
+});
+
+describe("guidanceExcerpt", () => {
+  const filler = (n: number) => "word ".repeat(n);
+
+  it("returns short documents untouched", () => {
+    const text = "A short press release with an Outlook section.";
+    expect(guidanceExcerpt(text, 6_000)).toBe(text);
+  });
+
+  it("centres on the outlook section rather than the top of the document", () => {
+    // Guidance sits well past the front matter, which is where a naive
+    // head-truncation would leave the reader.
+    const text = filler(3_000) + " Outlook Revenue is expected to be $91.0 billion. " + filler(3_000);
+    const out = guidanceExcerpt(text, 1_000);
+    expect(out).toContain("Outlook Revenue is expected to be $91.0 billion.");
+    expect(out.length).toBeLessThanOrEqual(1_000);
+  });
+
+  it("keeps the run-up so the sentence introducing guidance survives", () => {
+    const lead = "management provided the following. ";
+    const text = filler(2_000) + lead + "Outlook for the third quarter of fiscal 2027. " + filler(2_000);
+    expect(guidanceExcerpt(text, 2_000)).toContain(lead);
+  });
+
+  it("falls back to the head when no outlook section is present", () => {
+    // Apple's releases have no guidance; truncating from the top is the only
+    // sensible option, and must not throw or return nothing.
+    const text = "START " + filler(5_000);
+    const out = guidanceExcerpt(text, 500);
+    expect(out.startsWith("START")).toBe(true);
+    expect(out).toHaveLength(500);
   });
 });

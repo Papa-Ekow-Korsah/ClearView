@@ -49,6 +49,7 @@ Fill in `.env.local`:
 | `DATABASE_URL` | [neon.tech](https://neon.tech) — create a free project, copy the connection string |
 | `APP_PASSWORD_HASH` | `node -e "console.log(require('bcryptjs').hashSync('your-password', 12))"` — **escape every `$` as `\$` and quote the value** (Next.js expands `$VAR` in env files and silently mangles the hash otherwise) |
 | `SESSION_SECRET` | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+| `SEC_CONTACT_EMAIL` | Optional; appended to the User-Agent EDGAR requests send, as SEC's developer guidance asks. **Never put a URL in it** — SEC's edge returns 403 for any User-Agent containing one |
 
 Create the tables, then run:
 

@@ -19,7 +19,7 @@ import {
 import type { PeerRow, Snapshot } from "@/types/analysis";
 import type { NewsItem } from "@/lib/finnhub";
 import type { SecFinancials } from "@/lib/sec";
-import type { EarningsRelease } from "@/lib/edgar";
+import { guidanceExcerpt, type EarningsRelease } from "@/lib/edgar";
 import { foundFacts, type RetrievalResult } from "@/lib/websearch";
 
 export interface NoteInputV2 {
@@ -33,6 +33,8 @@ export interface NoteInputV2 {
   epsSurprises: EpsSurprise[];
   secFinancials: SecFinancials | null;
   earningsRelease: EarningsRelease | null;
+  /** The release before it, holding the guidance this quarter is scored against. */
+  priorEarningsRelease: EarningsRelease | null;
   retrieved: RetrievalResult | null;
   news: NewsItem[];
 }
@@ -85,16 +87,39 @@ function n(v: number | null, suffix = ""): string {
   return v === null ? "n/a" : `${v.toFixed(2)}${suffix}`;
 }
 
-function releaseBlock(release: EarningsRelease | null): string {
+function releaseBlock(
+  release: EarningsRelease | null,
+  prior: EarningsRelease | null
+): string {
   if (!release) {
-    return `EARNINGS PRESS RELEASE: not retrievable for this company. You have no source document for guidance, so set every guidance figure to the exact string "Not disclosed" and explain in guidance.narrative that no filed guidance could be retrieved. Do NOT estimate guidance numbers from memory — a fabricated figure attributed to management is the single worst error this tool can make.`;
+    return `EARNINGS PRESS RELEASE: not retrievable for this company. You have no source document for guidance, so set every guidance figure to the exact string "Not disclosed" and explain in guidance.narrative that no filed guidance could be retrieved. Do NOT estimate guidance numbers from memory — a fabricated figure attributed to management is the single worst error this tool can make.
+
+GUIDANCE DELIVERY: with no filed releases you cannot score management against its own guidance. Set guidanceDelivery.items to an empty array, quarter to "Not available", and summary to one sentence saying the filings could not be retrieved.`;
   }
+
+  const priorBlock = prior
+    ? `PRIOR EARNINGS PRESS RELEASE — ${prior.form} filed ${prior.filedDate} (the release BEFORE the one above; excerpt covering its outlook section):
+"""
+${guidanceExcerpt(prior.text)}
+"""
+
+GUIDANCE DELIVERY RULES (strict): the prior release states what management promised for the quarter that the latest release now reports. Score that promise against what was delivered.
+- Include a row ONLY where the PRIOR release states an explicit guidance figure or range for this reported quarter AND the LATEST release states the corresponding actual. Copy both verbatim.
+- Match the basis exactly. Non-GAAP guidance is scored against the non-GAAP actual, GAAP against GAAP; never mix them, and never compare a constant-currency or adjusted figure to a reported one. If the company changed its reporting basis between the two releases, use outcome "not_comparable" and say so.
+- outcome: "beat" above the range, "missed" below it, "met" inside it (a point estimate counts as met when the actual rounds to it).
+- Where the latest release itself states the comparison ("above the previously provided outlook of ..."), use its wording as the authority.
+- If the prior release gave full-year guidance only, or none at all, return an empty items array and explain that in summary. An empty scorecard is correct and expected for companies that do not guide; inventing rows is not.
+- Never use remembered guidance. Both numbers must come from the two documents above.`
+    : `PRIOR EARNINGS PRESS RELEASE: not retrievable. You therefore cannot check management's delivery against its own guidance. Set guidanceDelivery.items to an empty array, quarter to "Not available", and summary to one sentence saying the prior filing could not be retrieved. Do NOT score from memory.`;
+
   return `EARNINGS PRESS RELEASE — ${release.form} filed ${release.filedDate} (source document, quoted verbatim below):
 """
 ${release.text}
 """
 
-GUIDANCE RULES (strict): take every guidance figure ONLY from the press release text above, copying the numbers exactly as written. Do not adjust, round, annualise, or infer them. If the release does not state a particular figure, set that field to the exact string "Not disclosed" — never substitute an estimate or a remembered value. The app displays these next to a link to this filing, so a reader can check any number against the source.`;
+GUIDANCE RULES (strict): take every guidance figure ONLY from the press release text above, copying the numbers exactly as written. Do not adjust, round, annualise, or infer them. If the release does not state a particular figure, set that field to the exact string "Not disclosed" — never substitute an estimate or a remembered value. The app displays these next to a link to this filing, so a reader can check any number against the source.
+
+${priorBlock}`;
 }
 
 function buildPrompt(input: NoteInputV2): string {
@@ -152,7 +177,7 @@ ${epsTable || "n/a"}
 
 ${secBlock(input.secFinancials)}
 
-${releaseBlock(input.earningsRelease)}
+${releaseBlock(input.earningsRelease, input.priorEarningsRelease)}
 
 ${retrievedBlock(input.retrieved)}
 
@@ -221,7 +246,7 @@ const SECTION_PROMPTS = {
   coreVerdict:
     'Produce the OVERVIEW and VERDICT sections: the overall signal with its one-sentence data-packed reason, conviction, bull/bear cases, street consensus, recent analyst moves, the verdict synthesis, a 6-dimension scorecard, 2-3 time-bounded catalysts (nearest first), and the research recommendation with chips. Verdict language: "the analysis suggests…", never "you should…".',
   earnings:
-    "Produce the EARNINGS section: latest reported quarter with beat banner, revenue vs estimate, 3-4 revenue segments with relative bar sizes, 3-4 margin rows, balance sheet snapshot, 2-3 cash flow rows, next-quarter guidance, and the overall summary.",
+    "Produce the EARNINGS section: latest reported quarter with beat banner, revenue vs estimate, 3-4 revenue segments with relative bar sizes, 3-4 margin rows, balance sheet snapshot, 2-3 cash flow rows, the guidance-delivery scorecard (what management promised for this quarter in the prior release versus what the latest release reports it delivered — strictly from those two documents, empty if it cannot be scored), next-quarter guidance, and the overall summary.",
   ratios:
     "Produce the RATIOS section: exactly one interpretation entry per provided ratio key, in the same order as provided. The app renders the verified values next to your text — interpret those exact values against the peer values given.",
   deals:

@@ -528,6 +528,16 @@ function usd(v: number | null): string {
   return `$${v.toFixed(0)}`;
 }
 
+/**
+ * The model is instructed to write "Not disclosed" rather than invent a
+ * figure, which is right — but rendering that phrase inside a sentence built
+ * for a real value reads worse than omitting the element entirely.
+ */
+function isAbsent(v: string | null | undefined): boolean {
+  if (!v) return true;
+  return /^(not\s+(disclosed|available|found|provided|stated)|n\/?a|none|—|-)$/i.test(v.trim());
+}
+
 function pct(numerator: number | null, denominator: number | null): number | null {
   if (numerator === null || denominator === null || denominator === 0) return null;
   return (numerator / denominator) * 100;
@@ -537,6 +547,10 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
   const e = note.ai.earnings;
   const sec = note.secFinancials ?? null;
   const revConsensus = factOf(note, "REVENUE_CONSENSUS");
+  // Guidance is searched for on every run. When the filing itself couldn't be
+  // reached, a cited page is still far better than the model's memory, so it
+  // is used as the middle option rather than being thrown away.
+  const retrievedGuidance = factOf(note, "GUIDANCE");
   const latestEps = note.epsSurprises[0];
   const beat = (latestEps?.surprisePercent ?? 0) >= 0;
 
@@ -579,10 +593,16 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
                 <SourceCite url={revConsensus.url} />
               </div>
             </>
+          ) : isAbsent(e.revenue.estimate) ? (
+            // The model correctly declined to invent a consensus. Say that
+            // plainly instead of rendering "Est. Not available Not available".
+            <p className="text-[10px] text-ink-3 italic">No revenue consensus found</p>
           ) : (
             <p className="text-[10px] text-ink-3">
               Est. {e.revenue.estimate}{" "}
-              <span className="text-pos font-semibold">{e.revenue.beat}</span>
+              {!isAbsent(e.revenue.beat) && (
+                <span className="text-pos font-semibold">{e.revenue.beat}</span>
+              )}
               <span className="ml-1 text-ink-3 italic">(AI estimate — no source)</span>
             </p>
           )}
@@ -813,6 +833,8 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
         )}
       </div>
 
+      <GuidanceDelivery note={note} />
+
       <div className="bg-surface border border-line rounded-el p-4 mb-5">
         <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
           <h3 className="text-[10px] font-semibold tracking-[0.06em] uppercase text-ink-3 flex items-center gap-2">
@@ -822,13 +844,18 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
                 href={note.guidanceSource.url}
                 label={`${note.guidanceSource.form} ${note.guidanceSource.filedDate}`}
               />
+            ) : retrievedGuidance ? (
+              <SourceCite url={retrievedGuidance.url} />
             ) : (
               <AiSourcedTag />
             )}
           </h3>
-          <span className="text-[11px] text-accent bg-accent-dim px-2.5 py-0.5 rounded-full font-medium">
-            Reports {e.guidance.nextReportDate}
-          </span>
+          {/* "Reports Not disclosed" is worse than no chip at all. */}
+          {!isAbsent(e.guidance.nextReportDate) && (
+            <span className="text-[11px] text-accent bg-accent-dim px-2.5 py-0.5 rounded-full font-medium">
+              Reports {e.guidance.nextReportDate}
+            </span>
+          )}
         </div>
         <div className="grid grid-cols-3 gap-2 mb-3">
           <div className="bg-surface-2 rounded-el px-3 py-2.5">
@@ -845,6 +872,23 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
             <p className="text-[13px] font-semibold font-mono">{e.guidance.grossMargin}</p>
           </div>
         </div>
+        {/*
+          When the 8-K couldn't be reached the three figures above are "Not
+          disclosed" by design, so a retrieved and cited guidance line is the
+          only real number on this panel — show it rather than leaving the
+          reader with nothing.
+        */}
+        {!note.guidanceSource && retrievedGuidance && (
+          <div className="bg-surface-2 rounded-el px-3.5 py-3 mb-3">
+            <p className="text-[11px] text-ink-3 mb-1">
+              Guidance as reported (filing not retrievable)
+            </p>
+            <p className="text-[13px] text-ink-2 leading-relaxed mb-1.5">
+              {retrievedGuidance.value}
+            </p>
+            <SourceCite url={retrievedGuidance.url} />
+          </div>
+        )}
         <p className="text-xs text-ink-2 leading-relaxed pt-2.5 border-t border-line">
           {pick(e.guidance.narrative, mode)}
         </p>
@@ -855,6 +899,116 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
       </SectionLabel>
       <div className="bg-surface border border-line rounded-el p-4">
         <p className="text-[13px] text-ink-2 leading-[1.75]">{pick(e.summary, mode)}</p>
+      </div>
+    </div>
+  );
+}
+
+// ── Guidance delivery ────────────────────────────────────────────
+
+const OUTCOME_STYLE = {
+  beat: { chip: "bg-pos-bg text-pos", label: "Beat" },
+  met: { chip: "bg-surface-2 text-ink-2 border border-line", label: "Met" },
+  missed: { chip: "bg-neg-bg text-neg", label: "Missed" },
+  not_comparable: { chip: "bg-surface-2 text-ink-3 border border-line", label: "Not comparable" },
+} as const;
+
+/**
+ * Management's own promise, scored against what it delivered.
+ *
+ * This is the accountability question the rest of the earnings tab can't
+ * answer: analyst estimates measure the street, but guidance measures the
+ * company against itself. Both halves are quoted out of filed 8-Ks and both
+ * filings are linked, so a sceptical reader can check the promise and the
+ * result independently — which is the whole point of showing it.
+ */
+function GuidanceDelivery({ note }: { note: ResearchNoteV2 }) {
+  // Absent on notes generated before this existed — the schema requires it,
+  // but stored JSON predating it obviously doesn't have it. Saying nothing is
+  // right there: an empty scorecard would imply the company was checked and
+  // came up blank, which is a different claim.
+  const d = note.ai.earnings.guidanceDelivery as
+    | ResearchNoteV2["ai"]["earnings"]["guidanceDelivery"]
+    | undefined;
+  if (!d?.items) return null;
+
+  const scored = d.items.length > 0;
+
+  return (
+    <div className="mb-5">
+      <SectionLabel>
+        Did management hit its own guidance?{" "}
+        {note.priorGuidanceSource && note.guidanceSource && (
+          <span className="normal-case tracking-normal ml-1">
+            <SourcedTag
+              href={note.priorGuidanceSource.url}
+              label={`promise: ${note.priorGuidanceSource.form} ${note.priorGuidanceSource.filedDate}`}
+            />
+          </span>
+        )}
+      </SectionLabel>
+
+      <div className="bg-surface border border-line rounded-card p-4">
+        {scored ? (
+          <>
+            <div className="flex items-baseline justify-between gap-3 flex-wrap mb-3">
+              <p className="text-[13px] font-medium">
+                {d.quarter} — guided vs delivered
+              </p>
+              {note.guidanceSource && (
+                <SourcedTag
+                  href={note.guidanceSource.url}
+                  label={`result: ${note.guidanceSource.form} ${note.guidanceSource.filedDate}`}
+                />
+              )}
+            </div>
+
+            <div className="overflow-x-auto -mx-1 px-1">
+              <table className="w-full text-xs min-w-[420px]">
+                <thead>
+                  <tr className="text-ink-3 border-b border-line">
+                    <th className="text-left font-medium py-2 pr-3">Metric</th>
+                    <th className="text-right font-medium py-2 px-3">Guided</th>
+                    <th className="text-right font-medium py-2 px-3">Delivered</th>
+                    <th className="text-right font-medium py-2 pl-3">Outcome</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.items.map((it, i) => {
+                    const st = OUTCOME_STYLE[it.outcome] ?? OUTCOME_STYLE.not_comparable;
+                    return (
+                      <tr key={i} className="border-b border-line last:border-b-0">
+                        <td className="py-2.5 pr-3 text-ink-2">{it.metric}</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-ink-2">
+                          {it.guided}
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono font-semibold">
+                          {it.actual}
+                        </td>
+                        <td className="py-2.5 pl-3 text-right">
+                          <span
+                            className={`inline-block text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${st.chip}`}
+                          >
+                            {st.label}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <p className="text-[13px] text-ink-2 leading-relaxed mt-3 pt-3 border-t border-line">
+              {d.summary}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-ink-2 leading-relaxed">
+            <span className="font-medium text-ink">Not scored for this company.</span>{" "}
+            {d.summary}
+          </p>
+        )}
       </div>
     </div>
   );

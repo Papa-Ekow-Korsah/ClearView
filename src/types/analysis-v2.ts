@@ -122,6 +122,30 @@ export const earningsSectionSchema = z.object({
         })
       )
       .describe("2-3 rows: operating CF, free CF, buybacks/dividends"),
+    /**
+     * Did management hit the guidance it gave a quarter ago? Both sides come
+     * from filed press releases — the promise from the prior 8-K, the result
+     * from the latest — so every row is checkable against two linked
+     * documents. An empty items[] means it could not be scored honestly.
+     */
+    guidanceDelivery: z.object({
+      quarter: z.string().describe('The quarter being scored, e.g. "Q3 FY2026"'),
+      items: z
+        .array(
+          z.object({
+            metric: z.string().describe('e.g. "Non-GAAP EPS", "Revenue"'),
+            guided: z.string().describe("The promised figure or range, copied verbatim"),
+            actual: z.string().describe("The delivered figure, copied verbatim"),
+            outcome: z.enum(["beat", "met", "missed", "not_comparable"]),
+          })
+        )
+        .describe("Only metrics guided in the prior release AND reported in the latest one"),
+      summary: z
+        .string()
+        .describe(
+          "1-2 plain sentences on management's delivery against its own guidance, or why it couldn't be scored"
+        ),
+    }),
     guidance: z.object({
       quarter: z.string(),
       revenueRange: z.string(),
@@ -313,6 +337,13 @@ export interface ResearchNoteV2 {
    * null means it wasn't retrievable and guidance is unsourced.
    */
   guidanceSource?: { url: string; filedDate: string; form: string } | null;
+  /**
+   * The 8-K before it — the one that stated the guidance the latest quarter
+   * is scored against. Both links are shown beside the delivery scorecard so
+   * the promise and the result can each be checked at source. Absent on
+   * notes generated before the scorecard existed.
+   */
+  priorGuidanceSource?: { url: string; filedDate: string; form: string } | null;
   /**
    * Publicly reported facts with no affordable feed (revenue consensus,
    * analyst ratings and targets), retrieved by web search with a citation
