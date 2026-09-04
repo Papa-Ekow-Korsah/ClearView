@@ -136,13 +136,23 @@ function SourceCite({ url }: { url: string | null }) {
   );
 }
 
-function VerifiedTag() {
+/**
+ * `derived` marks flow figures reduced to a single quarter by subtracting the
+ * previous year-to-date filing. Both inputs are as-reported, so the badge
+ * stays teal — but the reader is told it's arithmetic across two filings
+ * rather than a number lifted from one, because that's a different claim.
+ */
+function VerifiedTag({ derived }: { derived?: boolean }) {
   return (
     <span
-      title="Figures in this section come directly from market data APIs."
+      title={
+        derived
+          ? "Quarterly figures computed from two as-reported SEC filings: this filing's year-to-date total minus the previous quarter's. A 10-Q reports year-to-date, not the quarter alone."
+          : "Figures in this section come directly from market data APIs."
+      }
       className="inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-wide text-teal bg-teal-bg rounded px-1.5 py-0.5"
     >
-      ✓ Verified data
+      {derived ? "✓ From filings (quarter derived)" : "✓ Verified data"}
     </span>
   );
 }
@@ -546,6 +556,10 @@ function pct(numerator: number | null, denominator: number | null): number | nul
 function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
   const e = note.ai.earnings;
   const sec = note.secFinancials ?? null;
+  // A 10-Q reports year-to-date, so every flow figure after Q1 is the quarter
+  // minus the prior quarter's YTD. Say so on the badge rather than implying
+  // the number was lifted whole from one filing.
+  const secDerived = sec?.periodBasis === "quarter-derived";
   const revConsensus = factOf(note, "REVENUE_CONSENSUS");
   // Guidance is searched for on every run. When the filing itself couldn't be
   // reached, a cited page is still far better than the model's memory, so it
@@ -576,7 +590,12 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
       <div className="grid sm:grid-cols-3 gap-2.5 mb-5">
         <div className="bg-surface border border-line rounded-el border-t-2 border-t-accent px-3.5 py-3">
           <p className="text-[10px] text-ink-3 mb-1 flex items-center gap-1.5">
-            Revenue {sec?.incomeStatement.revenue != null ? <VerifiedTag /> : <AiSourcedTag />}
+            Revenue{" "}
+            {sec?.incomeStatement.revenue != null ? (
+              <VerifiedTag derived={secDerived} />
+            ) : (
+              <AiSourcedTag />
+            )}
           </p>
           <p className="text-xl font-semibold font-mono leading-none mb-1.5">
             {sec?.incomeStatement.revenue != null ? usd(sec.incomeStatement.revenue) : e.revenue.value}
@@ -660,7 +679,7 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
           ))}
         </Panel>
         {sec?.incomeStatement.revenue != null ? (
-          <Panel title={`Margins — ${sec.fiscalPeriod}`} tag={<VerifiedTag />}>
+          <Panel title={`Margins — ${sec.fiscalPeriod}`} tag={<VerifiedTag derived={secDerived} />}>
             {(
               [
                 ["Gross margin", pct(sec.incomeStatement.grossProfit, sec.incomeStatement.revenue)],
@@ -786,7 +805,7 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
           </Panel>
         )}
         {sec?.cashFlow.operatingCF != null ? (
-          <Panel title={`Cash flow — ${sec.fiscalPeriod}`} tag={<VerifiedTag />}>
+          <Panel title={`Cash flow — ${sec.fiscalPeriod}`} tag={<VerifiedTag derived={secDerived} />}>
             {(
               [
                 ["Operating cash flow", sec.cashFlow.operatingCF],
@@ -810,6 +829,9 @@ function EarningsTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
               ))}
             <p className="text-[10px] text-ink-3 mt-2.5">
               Source: {sec.form} filed {sec.filedDate} (SEC, via Finnhub)
+              {secDerived
+                ? " — quarter computed as this filing's year-to-date less the previous quarter's"
+                : ""}
             </p>
           </Panel>
         ) : (

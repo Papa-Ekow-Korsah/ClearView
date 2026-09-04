@@ -77,7 +77,19 @@ function secBlock(sec: SecFinancials | null): string {
   const b = sec.balanceSheet;
   const i = sec.incomeStatement;
   const c = sec.cashFlow;
-  return `As-reported SEC financials (${sec.form}, ${sec.fiscalPeriod}, period ended ${sec.endDate} — USE THESE EXACT FIGURES for the earnings section; the app renders them as verified next to your narrative):
+  // A 10-Q's income statement and cash flow are year-to-date, so the period
+  // these figures cover has to be stated: describing a six-month total as a
+  // quarter, or a derived quarter as verbatim from the filing, would be the
+  // model repeating a mistake the extractor now avoids.
+  const periodNote =
+    sec.periodBasis === "quarter-derived"
+      ? `The income-statement and cash-flow figures below are for the QUARTER ALONE, computed as this filing's year-to-date total minus the previous quarter's. Refer to them as the quarter's results.`
+      : sec.periodBasis === "cumulative"
+        ? `WARNING: the income-statement and cash-flow figures below are YEAR-TO-DATE over ${sec.periodMonths ?? "several"} months, NOT a single quarter, because the previous filing needed to reduce them wasn't available. Never call them quarterly results; describe them as year-to-date. Balance sheet figures are point-in-time and unaffected.`
+        : `The income-statement and cash-flow figures below cover the quarter as filed.`;
+
+  return `As-reported SEC financials (${sec.form}, ${sec.fiscalPeriod}, period ended ${sec.endDate} — USE THESE EXACT FIGURES for the earnings section; the app renders them as verified next to your narrative).
+${periodNote}
 Income statement: revenue ${usd(i.revenue)}${i.revenueYoYPct != null ? ` (${i.revenueYoYPct >= 0 ? "+" : ""}${i.revenueYoYPct.toFixed(1)}% YoY)` : ""}, gross profit ${usd(i.grossProfit)}, operating income ${usd(i.operatingIncome)}, net income ${usd(i.netIncome)}, diluted EPS ${i.epsDiluted ?? "n/a"}
 Balance sheet: cash ${usd(b.cash)}, short-term investments ${usd(b.shortTermInvestments)}, total assets ${usd(b.totalAssets)}, total liabilities ${usd(b.totalLiabilities)}, equity ${usd(b.equity)}, short-term debt ${usd(b.shortTermDebt)}, long-term debt ${usd(b.longTermDebt)}, net debt ${usd(b.netDebt)}${b.netDebt !== null && b.netDebt < 0 ? " (net cash)" : ""}
 Cash flow (quarter): operating CF ${usd(c.operatingCF)}, capex ${usd(c.capex)}, free cash flow ${usd(c.freeCashFlow)}, buybacks ${usd(c.buybacks)}, dividends ${usd(c.dividends)}`;
@@ -336,12 +348,24 @@ async function generateSection<S extends z.ZodType>(
   client: Anthropic,
   basePrompt: string,
   sectionPrompt: string,
-  schema: S
+  schema: S,
+  // Named purely so the timing log below can say which section was slow.
+  // Wall time is the slowest section, and a silent retry doubles it, so
+  // without this a 300s timeout gives no clue where the time went.
+  name = "section"
 ): Promise<z.infer<S>> {
   for (let attempt = 1; attempt <= MAX_SECTION_ATTEMPTS; attempt++) {
+    const startedAt = Date.now();
     try {
-      return await generateSectionOnce(client, basePrompt, sectionPrompt, schema);
+      const out = await generateSectionOnce(client, basePrompt, sectionPrompt, schema);
+      console.info(
+        `[analyze] section ${name} ok in ${((Date.now() - startedAt) / 1000).toFixed(1)}s (attempt ${attempt})`
+      );
+      return out;
     } catch (err) {
+      console.warn(
+        `[analyze] section ${name} failed after ${((Date.now() - startedAt) / 1000).toFixed(1)}s (attempt ${attempt}): ${err instanceof Error ? err.message : err}`
+      );
       // Retry only truncation/parse failures; auth, refusal, rate limit
       // propagate immediately to the outer handler.
       if (err instanceof SectionRetryable && attempt < MAX_SECTION_ATTEMPTS) continue;
@@ -363,13 +387,17 @@ export async function generateAiNoteV2(input: NoteInputV2): Promise<AiNoteV2> {
   const base = buildPrompt(input);
 
   try {
+    const startedAt = Date.now();
     const [coreVerdict, earnings, ratios, deals, macro] = await Promise.all([
-      generateSection(client, base, SECTION_PROMPTS.coreVerdict, coreVerdictSchema),
-      generateSection(client, base, SECTION_PROMPTS.earnings, earningsSectionSchema),
-      generateSection(client, base, SECTION_PROMPTS.ratios, ratiosSectionSchema),
-      generateSection(client, base, SECTION_PROMPTS.deals, dealsSectionSchema),
-      generateSection(client, base, SECTION_PROMPTS.macro, macroSectionSchema),
+      generateSection(client, base, SECTION_PROMPTS.coreVerdict, coreVerdictSchema, "coreVerdict"),
+      generateSection(client, base, SECTION_PROMPTS.earnings, earningsSectionSchema, "earnings"),
+      generateSection(client, base, SECTION_PROMPTS.ratios, ratiosSectionSchema, "ratios"),
+      generateSection(client, base, SECTION_PROMPTS.deals, dealsSectionSchema, "deals"),
+      generateSection(client, base, SECTION_PROMPTS.macro, macroSectionSchema, "macro"),
     ]);
+    console.info(
+      `[analyze] all sections done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s (prompt ${base.length} chars)`
+    );
 
     return sanitize({
       ...coreVerdict,

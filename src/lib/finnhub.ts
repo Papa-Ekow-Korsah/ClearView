@@ -139,6 +139,12 @@ export interface ReportedFinancials {
     year: number;
     quarter: number;
     form: string;
+    /**
+     * Period START. Essential, not decorative: for every 10-Q after Q1 this
+     * is the fiscal-year start, meaning the income statement and cash flow
+     * cover six or nine months rather than the quarter the row is labelled.
+     */
+    startDate: string;
     endDate: string;
     filedDate: string;
     report: {
