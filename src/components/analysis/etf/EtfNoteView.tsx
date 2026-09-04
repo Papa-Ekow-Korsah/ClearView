@@ -89,7 +89,6 @@ export function EtfNoteView({ note }: { note: ResearchNoteEtf }) {
   const [tab, setTab] = useState<TabId>("overview");
   const [mode, setMode] = useState<Mode>("explain");
   const { ai, snapshot } = note;
-  const sig = SIGNAL_STYLE[ai.signal];
   const live = useLiveQuote(note.ticker);
   const price = live?.price ?? snapshot.price;
   const changePct = live?.changePct ?? snapshot.dayChangePct;
@@ -145,13 +144,17 @@ export function EtfNoteView({ note }: { note: ResearchNoteEtf }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-3.5 mb-4 flex-wrap">
-            <span
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-card text-sm font-semibold border shrink-0 ${sig.badge}`}
-            >
-              <span aria-hidden>{sig.icon}</span> {ai.signal}
-            </span>
-            <p className="text-[13px] text-ink-2 leading-relaxed flex-1 min-w-[240px]">
+          {/*
+            No signal badge here — same reason as the company view. A
+            BUY/HOLD/SELL beside the live price reads as a standing
+            instruction; the call belongs in the Verdict tab with its
+            evidence.
+          */}
+          <div className="mb-4">
+            <p className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-3 mb-1">
+              What the analysis found
+            </p>
+            <p className="text-[13px] text-ink-2 leading-relaxed max-w-3xl">
               {ai.signalReason}
             </p>
           </div>
@@ -538,6 +541,9 @@ function Verdict({ note, mode }: { note: ResearchNoteEtf; mode: Mode }) {
 
   return (
     <div>
+      <SectionLabel>
+        {mode === "explain" ? "Verdict — plain English" : "Verdict — analyst view"}
+      </SectionLabel>
       <div className="bg-surface border border-line rounded-card p-5 mb-5">
         <div className="flex items-start gap-4 mb-4 flex-wrap sm:flex-nowrap">
           <div
@@ -546,7 +552,21 @@ function Verdict({ note, mode }: { note: ResearchNoteEtf; mode: Mode }) {
             <span className="text-xl" aria-hidden>{sig.icon}</span>
             <span className="text-xs font-semibold tracking-wide">{note.ai.signal}</span>
           </div>
-          <p className="text-sm text-ink-2 leading-[1.8]">{pick(v.text, mode)}</p>
+          <div>
+            <p className="text-sm text-ink-2 leading-[1.8]">{pick(v.text, mode)}</p>
+            {/*
+              Funds have no street rating to cite, so the framing names what
+              the call actually rests on here: computed returns and risk, the
+              cost of holding it, and what it's exposed to.
+            */}
+            <p className="text-[11px] text-ink-3 leading-relaxed mt-2.5">
+              This {note.ai.signal} is where the evidence in this note points:
+              the returns and risk computed from this fund&apos;s own closing
+              prices, its cost, and what it actually holds, taken together. It
+              describes what the analysis supports, not what you should do with
+              your money.
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-3 pt-3.5 border-t border-line flex-wrap">
           <span className="text-xs text-ink-3 shrink-0">Analysis conviction</span>

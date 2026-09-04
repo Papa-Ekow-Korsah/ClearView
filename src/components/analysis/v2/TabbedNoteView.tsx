@@ -9,6 +9,7 @@ import type {
 } from "@/types/analysis-v2";
 import { useLiveQuote, type LiveData } from "@/components/analysis/v2/useLiveQuote";
 import { assessSource } from "@/lib/source-credibility";
+import { classifyConsensus } from "@/lib/consensus";
 
 type Mode = "explain" | "analyst";
 type TabId = "overview" | "earnings" | "ratios" | "deals" | "macro" | "verdict";
@@ -255,7 +256,6 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
   const [tab, setTab] = useState<TabId>("overview");
   const [mode, setMode] = useState<Mode>("explain");
   const { ai, snapshot } = note;
-  const sig = SIGNAL_STYLE[ai.signal];
   const live = useLiveQuote(note.ticker);
   const secStatus = secStatusOf(note);
   const price = live?.price ?? snapshot.price;
@@ -305,13 +305,17 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
             </div>
           </div>
 
-          <div className="flex items-center gap-3.5 mb-4 flex-wrap">
-            <span
-              className={`inline-flex items-center gap-2 px-4 py-2 rounded-card text-sm font-semibold border shrink-0 ${sig.badge}`}
-            >
-              <span aria-hidden>{sig.icon}</span> {ai.signal}
-            </span>
-            <p className="text-[13px] text-ink-2 leading-relaxed flex-1 min-w-[240px]">
+          {/*
+            No signal badge here. A BUY/HOLD/SELL sitting next to the live
+            price reads as a standing instruction on the security rather than
+            the conclusion of an argument. The call is made once, in the
+            Verdict tab, where the evidence behind it is on the same screen.
+          */}
+          <div className="mb-4">
+            <p className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-3 mb-1">
+              What the analysis found
+            </p>
+            <p className="text-[13px] text-ink-2 leading-relaxed max-w-3xl">
               {ai.signalReason}
             </p>
           </div>
@@ -403,10 +407,15 @@ function OverviewTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
   return (
     <div>
       <SectionLabel>At a glance</SectionLabel>
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-6">
+      {/*
+        Street consensus belongs here — it's a sourced fact about what other
+        people published. ClearView's own signal doesn't: stated as a bare
+        card with no argument attached, it reads as a recommendation. It
+        lives in the Verdict tab next to its reasoning instead.
+      */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 mb-6">
         <MetricCard label="Price" value={snapshot.price !== null ? `$${snapshot.price.toFixed(2)}` : "—"} />
         <MetricCard label="Market cap" value={fmtCap(snapshot.marketCap)} />
-        <MetricCard label="Signal" value={ai.signal} />
         {rating ? (
           <div className="bg-surface border border-line rounded-el px-3.5 py-3">
             <p className="text-[11px] text-ink-3 mb-1">Street consensus</p>
@@ -1146,11 +1155,42 @@ function VerdictTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
   const sig = SIGNAL_STYLE[note.ai.signal];
   const conv = CONV[note.ai.conviction];
 
+  // The consensus sentence below is a factual claim about what analysts have
+  // published, so it is only rendered when a retrieved, cited rating actually
+  // says so. No source, or a rating string that can't be read confidently,
+  // means the claim is simply not made — never inferred from our own signal.
+  const rating = factOf(note, "ANALYST_RATING");
+  const consensus = classifyConsensus(rating?.value);
+  const agrees = consensus !== null && consensus.toUpperCase() === note.ai.signal;
+
   return (
     <div>
       <SectionLabel>
         {mode === "explain" ? "Verdict — plain English" : "Verdict — analyst view"}
       </SectionLabel>
+
+      {consensus && rating && (
+        <div className="bg-surface-2 border border-line rounded-card px-4 py-3.5 mb-3">
+          <p className="text-[13px] text-ink-2 leading-relaxed">
+            <span className="font-medium text-ink">
+              The published analyst consensus on {note.ticker} is currently{" "}
+              {consensus}.
+            </span>{" "}
+            {agrees
+              ? `ClearView's own reading of the evidence below lands in the same place.`
+              : `ClearView's own reading of the evidence below lands on ${note.ai.signal} instead — the disagreement, and the reasoning behind it, is set out here.`}
+          </p>
+          {/*
+            The source's exact wording sits beside its citation so the reader
+            can check the one-word summary above against what was published.
+          */}
+          <p className="text-[11px] text-ink-3 mt-2 flex items-center gap-2 flex-wrap">
+            <span>As published: {rating.value}</span>
+            <SourceCite url={rating.url} />
+          </p>
+        </div>
+      )}
+
       <div className="bg-surface border border-line rounded-card p-5 mb-5">
         <div className="flex items-start gap-4 mb-4 flex-wrap sm:flex-nowrap">
           <div
@@ -1159,7 +1199,16 @@ function VerdictTab({ note, mode }: { note: ResearchNoteV2; mode: Mode }) {
             <span className="text-xl" aria-hidden>{sig.icon}</span>
             <span className="text-xs font-semibold tracking-wide">{note.ai.signal}</span>
           </div>
-          <p className="text-sm text-ink-2 leading-[1.8]">{pick(v.text, mode)}</p>
+          <div>
+            <p className="text-sm text-ink-2 leading-[1.8]">{pick(v.text, mode)}</p>
+            <p className="text-[11px] text-ink-3 leading-relaxed mt-2.5">
+              This {note.ai.signal} is where the evidence in this note points:{" "}
+              {consensus ? `the published analyst consensus (${consensus}), ` : ""}
+              the reported financials, the ratios against peers and the macro
+              backdrop, taken together. It describes what the analysis supports,
+              not what you should do with your money.
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-3 pt-3.5 border-t border-line flex-wrap">
           <span className="text-xs text-ink-3 shrink-0">Analysis conviction</span>
