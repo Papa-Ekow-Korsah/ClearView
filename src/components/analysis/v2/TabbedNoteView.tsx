@@ -10,12 +10,14 @@ import type {
 import { useLiveQuote, type LiveData } from "@/components/analysis/v2/useLiveQuote";
 import { assessSource } from "@/lib/source-credibility";
 import { classifyConsensus } from "@/lib/consensus";
+import { BusinessTab } from "@/components/analysis/v2/BusinessTab";
 
 type Mode = "explain" | "analyst";
-type TabId = "overview" | "earnings" | "ratios" | "deals" | "macro" | "verdict";
+type TabId = "overview" | "business" | "earnings" | "ratios" | "deals" | "macro" | "verdict";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Overview" },
+  { id: "business", label: "The Business" },
   { id: "earnings", label: "Earnings" },
   { id: "ratios", label: "Ratios" },
   { id: "deals", label: "Deals & Contracts" },
@@ -359,6 +361,9 @@ export function TabbedNoteView({ note }: { note: ResearchNoteV2 }) {
           )}
           {secStatus === "legacy" && <LegacyNotice />}
           {tab === "overview" && <OverviewTab note={note} mode={mode} />}
+          {tab === "business" && (
+            <BusinessTab ticker={note.ticker} companyName={note.companyName} />
+          )}
           {tab === "earnings" && <EarningsTab note={note} mode={mode} />}
           {tab === "ratios" && <RatiosTab note={note} mode={mode} live={live} />}
           {tab === "deals" && <DealsTab note={note} mode={mode} />}

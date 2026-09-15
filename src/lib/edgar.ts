@@ -25,7 +25,7 @@ const SEC_UA = SEC_CONTACT
   : "ClearView personal research tool";
 const HOUR = 3_600_000;
 
-async function secFetch(url: string): Promise<Response> {
+export async function secFetch(url: string): Promise<Response> {
   return fetch(url, {
     headers: { "User-Agent": SEC_UA, Accept: "application/json, text/html" },
     cache: "no-store",

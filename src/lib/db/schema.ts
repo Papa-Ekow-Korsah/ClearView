@@ -10,6 +10,7 @@ import {
 import type { ResearchNote } from "@/types/analysis";
 import type { ResearchNoteV2 } from "@/types/analysis-v2";
 import type { ResearchNoteEtf } from "@/types/analysis-etf";
+import type { CompanyProfile } from "@/types/company-profile";
 
 /** Every generated analysis, snapshotted in full so reopening never re-fetches. */
 export const analyses = pgTable("analyses", {
@@ -29,6 +30,30 @@ export const analyses = pgTable("analyses", {
    */
   deletedAt: timestamp("deleted_at", { withTimezone: true }),
 });
+
+/**
+ * The company profile, cached per filing rather than per analysis.
+ *
+ * A profile describes what the business is, which only changes when the
+ * company files a new 10-K — annually. Keying on the accession number means
+ * it is built once a year per company instead of on every analysis run: it
+ * never competes for the analysis request budget, and the cost is a rounding
+ * error. A new filing appears under a new accession and regenerates naturally.
+ */
+export const companyProfiles = pgTable(
+  "company_profiles",
+  {
+    id: serial("id").primaryKey(),
+    ticker: text("ticker").notNull(),
+    /** SEC accession number of the 10-K this was built from. */
+    accession: text("accession").notNull(),
+    profile: jsonb("profile").$type<CompanyProfile>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [uniqueIndex("company_profiles_ticker_accession_unique").on(t.ticker, t.accession)]
+);
 
 export const watchlist = pgTable(
   "watchlist",
