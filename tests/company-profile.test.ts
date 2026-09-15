@@ -127,3 +127,52 @@ describe("openingOf", () => {
     expect(openingOf(null)).toBeNull();
   });
 });
+
+describe("section start selection", () => {
+  it("takes the first real heading when the item number repeats later", () => {
+    // Microsoft's 10-K labels its closing "Available Information" block
+    // "Item 1" again. Searching from the end returned that tail instead of
+    // the business description — a 7k slice where the real one is 44k.
+    // Paragraph count matters: a bare "Item N" only counts as a heading when
+    // real prose follows rather than more contents rows, so the body has to be
+    // as long here as it is in a filing.
+    const body = Array.from(
+      { length: 6 },
+      (_, i) => `<p>${`The real description of what this company does, part ${i}. `.repeat(6)}</p>`
+    ).join("");
+    const html = `
+      <p>Item 1</p><p>Business</p>
+      ${body}
+      <p>Item 1</p><p>AVAILABLE INFORMATION</p>
+      <p>${"Our Internet address is www.example.com and we post filings there. ".repeat(6)}</p>
+      <p>Item 1A. Risk Factors</p>
+      <p>Risks follow here.</p>`;
+    const section = sliceItem(toLines(html), "1", "business", "1A", "risk\\s*factors", 1);
+    expect(section).toContain("The real description of what this company does");
+    // The tail must be inside the section, not the start of it.
+    expect(section!.indexOf("The real description")).toBeLessThan(section!.indexOf("Internet address"));
+  });
+});
+
+describe("openingOf — filing boilerplate", () => {
+  it("skips the investor-relations paragraph every 10-K carries", () => {
+    const business = [
+      "Item 1. Business",
+      `Our Internet address is www.example.com. At our Investor Relations website we make available free of charge a variety of information for investors, ${"including many useful things. ".repeat(6)}`,
+      `We design and manufacture industrial pumps for water treatment plants, ${"selling them through a global distributor network. ".repeat(5)}`,
+    ].join("\n");
+    const opening = openingOf(business);
+    expect(opening).toContain("We design and manufacture industrial pumps");
+    expect(opening).not.toContain("Internet address");
+  });
+
+  it("skips bulleted list items and safe-harbour language", () => {
+    const business = [
+      "Item 1. Business",
+      `• Our annual report on Form 10-K, quarterly reports on Form 10-Q, and current reports ${"and any amendments thereto. ".repeat(6)}`,
+      `This report contains forward-looking statements within the meaning of the Private Securities Litigation Reform Act ${"of 1995 and related provisions. ".repeat(4)}`,
+      `We operate retail grocery stores across twelve states, ${"serving roughly four million customers each week. ".repeat(5)}`,
+    ].join("\n");
+    expect(openingOf(business)).toContain("We operate retail grocery stores");
+  });
+});

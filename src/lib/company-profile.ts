@@ -188,7 +188,24 @@ export function openingOf(business: string | null): string | null {
   if (!business) return null;
   for (const line of business.split("\n")) {
     // Skip the heading itself and short sub-headings like "Our Company".
-    if (line.length >= 180) return line.length > 1200 ? `${line.slice(0, 1200).trim()}…` : line;
+    if (line.length < 180) continue;
+    if (isFilingBoilerplate(line)) continue;
+    return line.length > 1200 ? `${line.slice(0, 1200).trim()}…` : line;
   }
   return null;
+}
+
+/**
+ * Paragraphs that are about the filing rather than the business. Every 10-K
+ * carries them, and Microsoft's Item 1 opens with one — quoting "Our Internet
+ * address is www.microsoft.com" as the company's description of itself is
+ * worse than quoting nothing.
+ */
+function isFilingBoilerplate(line: string): boolean {
+  return (
+    /internet address|investor relations website|available free of charge/i.test(line) ||
+    /incorporated by reference|not part of.{0,20}this (?:annual )?report/i.test(line) ||
+    /forward-looking statements within the meaning|private securities litigation reform/i.test(line) ||
+    /^\s*[•·]/.test(line)
+  );
 }

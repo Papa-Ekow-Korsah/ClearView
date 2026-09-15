@@ -109,9 +109,14 @@ function startsFor(lines: string[], num: string, title: string): number[] {
 }
 
 /**
- * Text between one item heading and the next. Searched from the last candidate
- * backwards because the first hits are the table of contents; the body heading
- * is the later one, and the body is what has a real section after it.
+ * Text between one item heading and the next.
+ *
+ * Taken from the FIRST qualifying heading forwards. Contents rows are already
+ * excluded by the patterns above, so the earliest real heading is where the
+ * section begins — and working backwards actively breaks filings that repeat
+ * the item number partway through. Microsoft's 10-K labels its closing
+ * "Available Information" block "Item 1" again, and searching from the end
+ * returned that tail instead of the business description.
  */
 export function sliceItem(
   lines: string[],
@@ -123,9 +128,9 @@ export function sliceItem(
 ): string | null {
   const starts = startsFor(lines, startNum, startTitle);
   const ends = startsFor(lines, endNum, endTitle);
-  for (let k = starts.length - 1; k >= 0; k--) {
-    const end = ends.find((e) => e > starts[k] + minLines);
-    if (end !== undefined) return lines.slice(starts[k], end).join("\n");
+  for (const start of starts) {
+    const end = ends.find((e) => e > start + minLines);
+    if (end !== undefined) return lines.slice(start, end).join("\n");
   }
   return null;
 }
