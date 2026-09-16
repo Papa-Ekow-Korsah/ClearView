@@ -29,23 +29,35 @@ export async function GET(
 
   // Which 10-K is current? This is the cache key, and it's cheap — SEC
   // metadata, no model involved.
-  const tenK = await getLatestTenK(ticker).catch(() => null);
+  const result = await getLatestTenK(ticker).catch(
+    () => ({ ok: false, reason: "unreachable" }) as const
+  );
 
+  // A cached profile is still worth serving when SEC is unreachable: it was
+  // built from a real filing and is only at risk of being a year out of date.
   const cached = await getCompanyProfile(ticker);
-  if (cached && (!tenK || cached.accession === tenK.accession)) {
+  if (cached && (!result.ok || cached.accession === result.tenK.accession)) {
     return NextResponse.json({ profile: cached.profile, cached: true });
   }
 
-  if (!tenK) {
+  if (!result.ok) {
+    // Three different statements. Saying "this company files no annual report"
+    // because our own request failed would be a confident falsehood about the
+    // company — the precise error this app exists to avoid.
+    const messages: Record<typeof result.reason, string> = {
+      unreachable:
+        "Couldn't reach the SEC to read this company's annual report. That's a problem with the request, not a fact about the company — it very likely does file one. Try again shortly.",
+      "no-filing":
+        "The SEC lists no Form 10-K for this security. Foreign private issuers file 20-F or 40-F instead, which this reader doesn't cover, and funds don't file one at all.",
+      unparsable:
+        "This company's latest 10-K was retrieved but its Business and MD&A sections couldn't be located. Annual report formatting isn't standardised, and some filers — banks especially — incorporate those sections by reference.",
+    };
     return NextResponse.json(
-      {
-        error:
-          "No usable 10-K on file. Foreign private issuers file 20-F or 40-F instead, which this reader doesn't cover, and funds don't file one at all.",
-        reason: "no-filing",
-      },
-      { status: 404 }
+      { error: messages[result.reason], reason: result.reason },
+      { status: result.reason === "no-filing" ? 404 : 503 }
     );
   }
+  const tenK = result.tenK;
 
   // Generating is the only expensive path, so only it is rate limited — a
   // cache hit above costs nothing and shouldn't consume anyone's quota.
@@ -63,13 +75,11 @@ export async function GET(
   }
 
   try {
-    const profile = await buildCompanyProfile(ticker, request.nextUrl.searchParams.get("name") ?? ticker);
-    if (!profile) {
-      return NextResponse.json(
-        { error: "Couldn't read this company's 10-K.", reason: "no-filing" },
-        { status: 404 }
-      );
-    }
+    const profile = await buildCompanyProfile(
+      ticker,
+      request.nextUrl.searchParams.get("name") ?? ticker,
+      tenK
+    );
     await saveCompanyProfile(ticker, tenK.accession, profile);
     return NextResponse.json({ profile, cached: false });
   } catch (err) {

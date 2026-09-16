@@ -165,44 +165,71 @@ export function extractSections(html: string): Pick<TenK, "business" | "mdna"> {
 }
 
 /**
- * The company's most recent annual report. Returns null whenever anything is
- * missing — a foreign private issuer files 20-F and has no 10-K at all, which
- * the caller must report honestly rather than paper over.
+ * Why a 10-K couldn't be read. These are three different statements and must
+ * never be collapsed:
+ *  - "unreachable": we couldn't reach SEC. Says nothing about the company.
+ *  - "no-filing": SEC answered and this filer has no 10-K (foreign private
+ *    issuers file 20-F; funds file none). A real fact about the company.
+ *  - "unparsable": the 10-K exists but its sections couldn't be located.
+ * Telling a reader Microsoft files no annual report because our request
+ * failed would be exactly the kind of confident falsehood this app exists to
+ * avoid.
  */
-export async function getLatestTenK(ticker: string): Promise<TenK | null> {
-  try {
-    const cik = await getCik(ticker);
-    if (!cik) return null;
+export type TenKFailure = "unreachable" | "no-filing" | "unparsable";
 
+export type TenKResult =
+  | { ok: true; tenK: TenK }
+  | { ok: false; reason: TenKFailure };
+
+/** The company's most recent annual report, or why there isn't one to read. */
+export async function getLatestTenK(ticker: string): Promise<TenKResult> {
+  let cik: string | null;
+  try {
+    cik = await getCik(ticker);
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+  // getCik returns null both when SEC is unreachable and when the ticker is
+  // genuinely absent from the map. The map covers every US filer, so for a
+  // ticker that quotes on a US exchange, unreachable is the likelier of the
+  // two and the safer thing to claim.
+  if (!cik) return { ok: false, reason: "unreachable" };
+
+  try {
     const subRes = await secFetch(`https://data.sec.gov/submissions/CIK${cik}.json`);
-    if (!subRes.ok) return null;
+    if (!subRes.ok) return { ok: false, reason: "unreachable" };
     const subs = (await subRes.json()) as Submissions;
     const recent = subs.filings?.recent;
-    if (!recent?.form) return null;
+    if (!recent?.form) return { ok: false, reason: "unreachable" };
 
+    // SEC answered and listed this filer's forms. A missing 10-K here is a
+    // genuine fact about the company.
     const idx = recent.form.indexOf("10-K");
-    if (idx === -1) return null;
+    if (idx === -1) return { ok: false, reason: "no-filing" };
 
     const accessionRaw = recent.accessionNumber?.[idx] ?? "";
     const primary = recent.primaryDocument?.[idx] ?? "";
-    if (!accessionRaw || !primary) return null;
+    if (!accessionRaw || !primary) return { ok: false, reason: "unparsable" };
 
     const accession = accessionRaw.replace(/-/g, "");
     const url = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accession}/${primary}`;
     const docRes = await secFetch(url);
-    if (!docRes.ok) return null;
+    if (!docRes.ok) return { ok: false, reason: "unreachable" };
 
     const { business, mdna } = extractSections(await docRes.text());
-    if (!business && !mdna) return null; // nothing usable — say so upstream
+    if (!business && !mdna) return { ok: false, reason: "unparsable" };
 
     return {
-      url,
-      accession: accessionRaw,
-      filedDate: recent.filingDate?.[idx] ?? "",
-      business,
-      mdna,
+      ok: true,
+      tenK: {
+        url,
+        accession: accessionRaw,
+        filedDate: recent.filingDate?.[idx] ?? "",
+        business,
+        mdna,
+      },
     };
   } catch {
-    return null;
+    return { ok: false, reason: "unreachable" };
   }
 }

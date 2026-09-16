@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { config } from "@/lib/config";
 import { AnalysisGenerationError } from "@/lib/anthropic";
-import { getLatestTenK, type TenK } from "@/lib/tenk";
+import type { TenK } from "@/lib/tenk";
 import {
   companyProfileSchema,
   SECTION_TITLES,
@@ -99,17 +99,15 @@ For "plans", use only intentions management has actually stated — capital allo
 const TIMEOUT_MS = 180_000;
 
 /**
- * Generate and verify a profile. Returns null when the company has no usable
- * 10-K — a foreign private issuer filing 20-F, or a filing whose sections
- * couldn't be located — which the caller reports rather than papers over.
+ * Generate and verify a profile from a 10-K the caller has already fetched.
+ * Fetching is the caller's job so it can tell the reader WHY there is no
+ * profile — unreachable, no such filing, or unparsable are different claims.
  */
 export async function buildCompanyProfile(
   ticker: string,
-  companyName: string
-): Promise<CompanyProfile | null> {
-  const tenK = await getLatestTenK(ticker);
-  if (!tenK) return null;
-
+  companyName: string,
+  tenK: TenK
+): Promise<CompanyProfile> {
   const client = new Anthropic({ apiKey: config.anthropicApiKey, maxRetries: 0 });
 
   let ai: CompanyProfileAi;

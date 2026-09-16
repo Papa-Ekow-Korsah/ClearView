@@ -57,8 +57,12 @@ export function BusinessTab({
       <div className="bg-surface border border-line rounded-card px-4 py-4">
         <p className="text-[13px] font-medium mb-1">
           {reason === "no-filing"
-            ? `No annual report available for ${ticker}`
-            : "Couldn't build the company profile"}
+            ? `No Form 10-K on file for ${ticker}`
+            : reason === "unreachable"
+              ? "Couldn't reach the SEC"
+              : reason === "unparsable"
+                ? `Couldn't read ${ticker}'s annual report`
+                : "Couldn't build the company profile"}
         </p>
         <p className="text-xs text-ink-2 leading-relaxed">{error}</p>
       </div>
