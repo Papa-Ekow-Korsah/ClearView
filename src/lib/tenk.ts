@@ -73,12 +73,26 @@ function headingRe(num: string, title: string): RegExp {
   return new RegExp(`^(?:part\\s+[ivx]+[\\s.:-]+)?item\\s*${num}[.:\\s–—-]+${title}\\s*[.:]?\\s*$`, "i");
 }
 
+/**
+ * The same heading with every space removed. Some filings split words across
+ * inline spans, so Oracle's 10-K renders "Item 1A. R isk Factors" and
+ * "Financial Statemen ts" — correct text, broken spacing. Squashed, both sides
+ * of the comparison lose the stray spaces and the title matches again.
+ */
+function squashedHeadingRe(num: string, title: string): RegExp {
+  const squashedTitle = title.replace(/\\s[*+]/g, "");
+  return new RegExp(`^(?:part[ivx]+[.:–—-]*)?item${num}[.:–—-]*${squashedTitle}[.:]?$`, "i");
+}
+
 /** Lines that are a heading for this item, titled. */
 function titledHeadings(lines: string[], num: string, title: string): number[] {
   const re = headingRe(num, title);
+  const squashed = squashedHeadingRe(num, title);
   const out: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].length <= MAX_HEADING && re.test(lines[i])) out.push(i);
+    const line = lines[i];
+    if (line.length > MAX_HEADING) continue;
+    if (re.test(line) || squashed.test(line.replace(/\s+/g, ""))) out.push(i);
   }
   return out;
 }

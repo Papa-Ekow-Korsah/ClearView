@@ -154,6 +154,20 @@ describe("section start selection", () => {
   });
 });
 
+describe("headings split across inline spans", () => {
+  it("matches a title whose words are broken by stray spaces", () => {
+    // Real shapes from Oracle's and Microsoft's 10-Ks: "R isk Factors",
+    // "B USINESS". The text is right; only the spacing is broken.
+    const body = Array.from(
+      { length: 4 },
+      (_, i) => `<p>${`Oracle provides products and services, part ${i}. `.repeat(6)}</p>`
+    ).join("");
+    const html = `<p>ITEM 1. B USINESS</p>${body}<p>Item 1A. R isk Factors</p><p>Risks.</p>`;
+    const section = sliceItem(toLines(html), "1", "business", "1A", "risk\\s*factors", 1);
+    expect(section).toContain("Oracle provides products and services");
+  });
+});
+
 describe("openingOf — filing boilerplate", () => {
   it("skips the investor-relations paragraph every 10-K carries", () => {
     const business = [
