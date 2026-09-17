@@ -70,6 +70,9 @@ export async function GET(
 
   // Generating is the only expensive path, so only it is rate limited.
   const rate = await checkRateLimit("company-profile", ANALYZE_LIMIT.limit, ANALYZE_LIMIT.windowMs);
+  if (!rate.allowed && cached) {
+    return NextResponse.json({ profile: cached.profile, cached: true, stale: true });
+  }
   if (!rate.allowed) {
     const mins = Math.ceil((rate.resetAt.getTime() - Date.now()) / 60000);
     return NextResponse.json(
@@ -79,7 +82,10 @@ export async function GET(
   }
 
   const sources = await fetchSources(found.refs);
-  if (!sources.ok) return failure(sources.reason);
+  if (!sources.ok) {
+    if (cached) return NextResponse.json({ profile: cached.profile, cached: true, stale: true });
+    return failure(sources.reason);
+  }
 
   try {
     const profile = await buildCompanyProfile(
@@ -91,6 +97,12 @@ export async function GET(
     await saveCompanyProfile(ticker, found.refs.key, profile);
     return NextResponse.json({ profile, cached: false });
   } catch (err) {
+    // A rebuild that fails — out of credits, a timeout — shouldn't take away
+    // a profile the reader could already see. Serve the older one.
+    if (cached) {
+      console.error("company profile rebuild failed; serving cached:", err);
+      return NextResponse.json({ profile: cached.profile, cached: true, stale: true });
+    }
     if (err instanceof AnalysisGenerationError) {
       return NextResponse.json({ error: err.message }, { status: 502 });
     }

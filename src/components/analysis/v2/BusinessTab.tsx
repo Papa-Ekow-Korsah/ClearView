@@ -80,10 +80,12 @@ export function BusinessTab({
   if (!profile) return null;
 
   if (profile.formatVersion < PROFILE_FORMAT_VERSION) {
+    // Built before the long-form version and not yet rebuilt. Its content is
+    // still verified and still useful, so show it rather than a blank notice.
     return (
-      <Notice
-        title="This profile is being upgraded"
-        body="The in-depth version of this company profile, drawing on the latest 10-K, 10-Q and earnings releases, hasn't been built yet. Check back shortly."
+      <LegacyProfileView
+        profile={profile as unknown as LegacyProfile}
+        firm={companyName || profile.companyName}
       />
     );
   }
@@ -180,6 +182,95 @@ function ProfileView({ profile, firm }: { profile: CompanyProfile; firm: string 
           Nothing comes from the model&apos;s own knowledge of the company.
         </p>
       </section>
+    </div>
+  );
+}
+
+// ── older profiles ───────────────────────────────────────────────
+
+/**
+ * The stored shape of v1/v2 profiles: short quote-verified points per
+ * section, drawn from the 10-K alone. Kept only so a profile that hasn't yet
+ * been rebuilt still renders its content instead of an empty notice.
+ */
+interface LegacyProfile {
+  companyName: string;
+  filing: { url: string; filedDate: string };
+  opening: string | null;
+  sections: { key: string; title: string; claims: { point: string }[] }[];
+  segments?: { name: string; amountAsStated: string; amount: number; period: string }[];
+  valueChain?: { stage: string; detail: string }[];
+}
+
+const LEGACY_ICONS: Record<string, IconName> = {
+  whatItIs: "building",
+  howItMakesMoney: "money",
+  customers: "people",
+  competition: "shield",
+  plans: "compass",
+};
+
+function LegacyProfileView({ profile, firm }: { profile: LegacyProfile; firm: string }) {
+  const footer = (
+    <p className="text-[11px] text-ink-3 leading-relaxed">
+      Derived from {firm}&apos;s{" "}
+      <a href={profile.filing.url} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+        Form 10-K filed {profile.filing.filedDate} ↗
+      </a>
+    </p>
+  );
+  const segments = (profile.segments ?? []) as unknown as VerifiedSegment[];
+  const steps = (profile.valueChain ?? []) as unknown as VerifiedValueStep[];
+
+  return (
+    <div className="grid gap-5">
+      <Notice
+        title="Summary version"
+        body={`The in-depth profile of ${firm}, drawing on its latest 10-Q and earnings releases as well as the 10-K, hasn't been built yet. This shorter version is from the annual report alone.`}
+      />
+      {profile.opening && (
+        <figure className="bg-surface border border-line rounded-card px-6 py-5">
+          <p className="text-[10px] font-semibold tracking-[0.1em] uppercase text-ink-3 mb-3">
+            In {firm}&apos;s own words
+          </p>
+          <blockquote className="text-[16px] text-ink leading-[1.7] border-l-[3px] border-accent pl-4">
+            {profile.opening}
+          </blockquote>
+        </figure>
+      )}
+      {(steps.length >= 2 || segments.length >= 2) && (
+        <div className={`grid gap-5 ${steps.length >= 2 && segments.length >= 2 ? "lg:grid-cols-2" : ""}`}>
+          {steps.length >= 2 && (
+            <Tile title="How the business works" icon="flow" footer={footer}>
+              <ValueChainFlow steps={steps} />
+            </Tile>
+          )}
+          {segments.length >= 2 && (
+            <Tile
+              title="Where the revenue comes from"
+              subtitle={`Revenue by reportable segment, ${segments[0].period}`}
+              icon="chart"
+              footer={footer}
+            >
+              <SegmentBars segments={segments} />
+            </Tile>
+          )}
+        </div>
+      )}
+      {profile.sections
+        .filter((s) => s.claims.length > 0)
+        .map((s) => (
+          <Tile key={s.key} title={s.title} icon={LEGACY_ICONS[s.key] ?? "building"} footer={footer}>
+            <ul className="grid gap-2.5">
+              {s.claims.map((c, i) => (
+                <li key={i} className="flex gap-2.5 text-[14px] text-ink-2 leading-[1.7]">
+                  <span className="mt-[10px] w-1.5 h-1.5 rounded-full bg-accent shrink-0" aria-hidden />
+                  <span>{c.point}</span>
+                </li>
+              ))}
+            </ul>
+          </Tile>
+        ))}
     </div>
   );
 }
