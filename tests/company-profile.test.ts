@@ -1,70 +1,119 @@
 import { describe, expect, it } from "vitest";
-import { normalizeForMatch, verifyClaim, openingOf } from "@/lib/company-profile";
+import {
+  figuresSupported,
+  findQuote,
+  normalizeForMatch,
+  openingOf,
+  verifyParagraph,
+} from "@/lib/company-profile";
 import { toLines, sliceItem, extractSections } from "@/lib/tenk";
-import type { Claim } from "@/types/company-profile";
 
-const claim = (quote: string, source: Claim["source"] = "business"): Claim => ({
-  point: "Some statement about the business.",
-  quote,
-  source,
-});
-
-// A sentence long enough to clear the minimum-length guard.
 const REAL =
   "We make our branded beverage products available to consumers through our network of independent bottling partners, distributors, wholesalers and retailers.";
 
-describe("verifyClaim", () => {
-  const sources = { business: `Item 1. Business\n${REAL}\nOther text.`, mdna: null };
+const docs = [
+  { id: "10k-business", text: `Item 1. Business\n${REAL}\nOther text.` },
+  { id: "10q-mdna", text: "Net operating revenues grew 6% to $12,472 million in the first quarter of 2026." },
+  { id: "release1", text: "Revenue was $81.6 billion, up 85% from a year ago, for the quarter ended April 26, 2026." },
+];
 
-  it("accepts a quote that appears in the filing", () => {
-    expect(verifyClaim(claim(REAL), sources)).toBe(true);
+describe("findQuote", () => {
+  it("returns the document a real passage is in", () => {
+    expect(findQuote(REAL, "10k-business", docs)).toBe("10k-business");
   });
 
   it("rejects a paraphrase — the whole point of the check", () => {
-    // Plausible, on-topic, and nowhere in the document. This is exactly the
-    // failure mode the feature exists to prevent.
     const invented =
       "We distribute our beverage products worldwide via independent bottling partners and retail distributors.";
-    expect(verifyClaim(claim(invented), sources)).toBe(false);
+    expect(findQuote(invented, "10k-business", docs)).toBeNull();
   });
 
-  it("rejects a fabricated sentence outright", () => {
+  it("rejects a passage too short to prove anything", () => {
+    expect(findQuote("our network", "10k-business", docs)).toBeNull();
+  });
+
+  it("attributes a real passage to where it was actually found, not where it was cited", () => {
+    // Citing the 10-K for a sentence from the earnings release is a
+    // bookkeeping slip, not an invention.
+    expect(findQuote("Revenue was $81.6 billion, up 85% from a year ago", "10k-business", docs)).toBe("release1");
+  });
+
+  it("tolerates curly quotes, dashes and line breaks", () => {
+    const d = [{ id: "a", text: "We expanded the company’s reach —\nmaterially — during the year." }];
+    expect(findQuote("We expanded the company's reach - materially - during the year.", "a", d)).toBe("a");
+  });
+});
+
+describe("figuresSupported", () => {
+  const quote = "Net operating revenues grew 6% to $12,472 million in the first quarter of 2026.";
+
+  it("accepts figures copied from the passage", () => {
+    expect(figuresSupported("Revenue grew 6% to $12,472 million in the first quarter of 2026.", [quote])).toBe(true);
+  });
+
+  it("accepts a restated unit — $12.5 billion from $12,472 million", () => {
+    expect(figuresSupported("Quarterly revenue reached about $12.5 billion.", [quote])).toBe(true);
+  });
+
+  it("rejects a figure the passage doesn't contain", () => {
+    // Plausible, specific, and invented: the exact thing long prose invites.
+    expect(figuresSupported("Revenue grew 9% to $12,472 million.", [quote])).toBe(false);
+  });
+
+  it("rejects a computed figure the documents never state", () => {
+    expect(figuresSupported("That was roughly $3.1 billion more than a year earlier.", [quote])).toBe(false);
+  });
+
+  it("requires years to match exactly", () => {
+    expect(figuresSupported("In the first quarter of 2025 revenue grew 6%.", [quote])).toBe(false);
+  });
+
+  it("ignores numbers that are names, not figures", () => {
+    // Form types, quarters and product codes aren't claims.
+    expect(figuresSupported("The 10-K and Q1 results cover the H100 and Microsoft 365 E5.", [quote])).toBe(true);
+  });
+
+  it("allows small bare counts but not small percentages", () => {
+    expect(figuresSupported("The company runs 4 operating segments.", [quote])).toBe(true);
+    expect(figuresSupported("Margins improved 4% in the period.", [quote])).toBe(false);
+  });
+});
+
+describe("verifyParagraph", () => {
+  it("keeps a paragraph whose passages are real and whose figures are in them", () => {
+    const out = verifyParagraph(
+      {
+        text: "Coca-Cola's revenue grew 6% to $12,472 million in the first quarter of 2026.",
+        evidence: [{ quote: "Net operating revenues grew 6% to $12,472 million in the first quarter of 2026.", sourceId: "10q-mdna" }],
+      },
+      docs
+    );
+    expect(out?.evidence).toHaveLength(1);
+  });
+
+  it("drops a paragraph with no real passage", () => {
     expect(
-      verifyClaim(
-        claim("The company expects revenue to double over the next three fiscal years."),
-        sources
+      verifyParagraph(
+        { text: "The company is growing quickly.", evidence: [{ quote: "The company grew very quickly across all of its markets.", sourceId: "10q-mdna" }] },
+        docs
       )
-    ).toBe(false);
+    ).toBeNull();
   });
 
-  it("rejects a quote too short to prove anything", () => {
-    // "our network" appears verbatim, but proves nothing about the claim.
-    expect(verifyClaim(claim("our network"), sources)).toBe(false);
-  });
-
-  it("tolerates curly quotes and dashes that filings use and models normalise", () => {
-    const filing = { business: "We expanded the company’s reach — materially — during the year.", mdna: null };
-    expect(
-      verifyClaim(claim("We expanded the company's reach - materially - during the year."), filing)
-    ).toBe(true);
-  });
-
-  it("tolerates line breaks inside a quoted sentence", () => {
-    const filing = { business: "Revenue grew because of\nhigher concentrate pricing across markets.", mdna: null };
-    expect(
-      verifyClaim(claim("Revenue grew because of higher concentrate pricing across markets."), filing)
-    ).toBe(true);
-  });
-
-  it("still verifies when the model names the wrong section", () => {
-    // Mislabelling Item 1 as Item 7 is bookkeeping, not fabrication, and
-    // shouldn't cost a genuine quote.
-    const split = { business: null, mdna: REAL };
-    expect(verifyClaim(claim(REAL, "business"), split)).toBe(true);
-  });
-
-  it("rejects everything when no source text was available", () => {
-    expect(verifyClaim(claim(REAL), { business: null, mdna: null })).toBe(false);
+  it("drops a paragraph whose figure only exists in a fabricated passage", () => {
+    // One real passage and one invented one; the invented one is discarded,
+    // so the figure it would have supported is left unsupported.
+    const out = verifyParagraph(
+      {
+        text: "Revenue grew 6%, and management expects 20% growth next year.",
+        evidence: [
+          { quote: "Net operating revenues grew 6% to $12,472 million in the first quarter of 2026.", sourceId: "10q-mdna" },
+          { quote: "Management expects revenue growth of 20% in the next fiscal year.", sourceId: "release1" },
+        ],
+      },
+      docs
+    );
+    expect(out).toBeNull();
   });
 });
 

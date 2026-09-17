@@ -1,15 +1,16 @@
 /**
  * Build company profiles from a machine that can reach EDGAR.
  *
- * SEC blocks Vercel's egress, so production cannot fetch a 10-K itself. It can
- * still serve one: profiles are cached in Postgres keyed by accession number,
- * and the route returns a cached profile even when SEC is unreachable. Running
- * this from a normal network fills that cache.
+ * SEC blocks Vercel's egress, so production cannot fetch filings itself. It
+ * can still serve profiles: they're cached in Postgres keyed by the documents
+ * they were built from, and the route returns a cached profile even when SEC
+ * is unreachable. Running this from a normal network fills that cache.
  *
  *   npm run profiles -- MSFT NVDA KO
+ *   npm run profiles -- --force MSFT      rebuild even if current
  *
- * Re-running is cheap: a ticker whose cached profile already matches the
- * current filing is skipped without calling the model.
+ * Re-running is cheap: a ticker whose cached profile already matches its
+ * current 10-K, 10-Q and earnings releases is skipped without calling the model.
  */
 import { readFileSync } from "node:fs";
 
@@ -18,16 +19,15 @@ for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
 }
 
-const { getLatestTenK } = await import("@/lib/tenk");
+const { getSourceRefs, fetchSources } = await import("@/lib/company-sources");
 const { buildCompanyProfile } = await import("@/lib/company-profile");
 const { getCompanyProfile, saveCompanyProfile, listAnalyses } = await import("@/lib/db/queries");
 const { PROFILE_FORMAT_VERSION } = await import("@/types/company-profile");
 
 const args = process.argv.slice(2);
-// --force rebuilds even when the cached profile matches the current filing —
-// for when the prompt or verification improves and existing profiles should
-// benefit.
 const force = args.includes("--force");
+// --verbose prints every dropped paragraph and why, to tune verification.
+const verbose = args.includes("--verbose");
 const tickers = args.filter((a) => !a.startsWith("--")).map((t) => t.toUpperCase());
 if (tickers.length === 0) {
   console.error("usage: npm run profiles -- [--force] TICKER [TICKER...]");
@@ -41,23 +41,29 @@ let failed = 0;
 for (const ticker of tickers) {
   process.stdout.write(`${ticker.padEnd(6)} `);
 
-  const result = await getLatestTenK(ticker);
-  if (!result.ok) {
-    console.log(`skip — ${result.reason}`);
+  const found = await getSourceRefs(ticker);
+  if (!found.ok) {
+    console.log(`skip — ${found.reason}`);
     failed++;
     continue;
   }
-  const tenK = result.tenK;
 
   const cached = await getCompanyProfile(ticker);
   if (
     !force &&
     cached &&
-    cached.accession === tenK.accession &&
+    cached.accession === found.refs.key &&
     cached.profile.formatVersion >= PROFILE_FORMAT_VERSION
   ) {
-    console.log(`already current (10-K ${tenK.filedDate})`);
+    console.log("already current");
     skipped++;
+    continue;
+  }
+
+  const sources = await fetchSources(found.refs);
+  if (!sources.ok) {
+    console.log(`skip — ${sources.reason}`);
+    failed++;
     continue;
   }
 
@@ -67,17 +73,35 @@ for (const ticker of tickers) {
   const name = latest?.companyName ?? ticker;
 
   const rejected: string[] = [];
+  const dropped: string[] = [];
   try {
     const started = Date.now();
-    const profile = await buildCompanyProfile(ticker, name, tenK, {
+    const profile = await buildCompanyProfile(ticker, name, found.refs, sources.docs, {
+      timeoutMs: 600_000,
       onSegmentReject: (segment, reason) => rejected.push(`${segment}: ${reason}`),
+      onParagraphDiscard: (section, para, reason, detail) => {
+        const quotes = para.evidence
+          .map((e) => `      [${e.sourceId}] ${e.quote.slice(0, 160)}`)
+          .join(String.fromCharCode(10));
+        const label = `  [${section}] ${reason}${detail ? ` (${detail})` : ""}: ${para.text.slice(0, 180)}`;
+        dropped.push([label, quotes].join(String.fromCharCode(10)));
+      },
     });
-    await saveCompanyProfile(ticker, tenK.accession, profile);
-    const verified = profile.sections.reduce((n, s) => n + s.claims.length, 0);
+    await saveCompanyProfile(ticker, found.refs.key, profile);
+
+    const paragraphs = profile.sections.reduce(
+      (n, s) => n + s.blocks.reduce((m, b) => m + b.paragraphs.length, 0),
+      0
+    );
+    const words = profile.sections
+      .flatMap((s) => s.blocks.flatMap((b) => b.paragraphs.map((p) => p.text)))
+      .join(" ")
+      .split(/\s+/).length;
     console.log(
-      `built in ${((Date.now() - started) / 1000).toFixed(0)}s — ${verified} claims, ${profile.valueChain?.length ?? 0} flow steps, ${profile.segments?.length ?? 0} segments, ${profile.discardedClaims} discarded`
+      `built in ${((Date.now() - started) / 1000).toFixed(0)}s — ${paragraphs} paragraphs (~${words} words), ${profile.valueChain.length} flow steps, ${profile.segments.length} segments, ${profile.discarded} discarded, ${sources.docs.length} documents read`
     );
     for (const r of rejected) console.log(`         segment dropped — ${r}`);
+    if (verbose) for (const d of dropped) console.log(d);
     built++;
   } catch (err) {
     console.log(`FAILED — ${err instanceof Error ? err.message : err}`);

@@ -164,6 +164,40 @@ function cap(text: string | null, chars: number): string | null {
 
 const BUSINESS_CHARS = 90_000;
 const MDNA_CHARS = 90_000;
+const RISK_CHARS = 60_000;
+const QUARTERLY_MDNA_CHARS = 60_000;
+
+/** Management's own description of what could go wrong — Item 1A. */
+export function extractRiskFactors(html: string): string | null {
+  const lines = toLines(html);
+  const risk = "risk\\s*factors.{0,20}";
+  // Item 1B (Unresolved Staff Comments) normally follows; some filers skip it
+  // and go straight to Item 1C (Cybersecurity) or Item 2 (Properties).
+  const section =
+    sliceItem(lines, "1A", risk, "1B", "unresolved.{0,60}") ??
+    sliceItem(lines, "1A", risk, "1C", "cybersecurity.{0,20}") ??
+    sliceItem(lines, "1A", risk, "2", "properties.{0,20}");
+  return cap(section, RISK_CHARS);
+}
+
+/**
+ * A 10-Q's MD&A — Part I, Item 2. It covers only the latest quarter, which is
+ * why it's worth reading alongside the annual report: it says what changed
+ * since the 10-K was written.
+ */
+export function extractQuarterlyMdna(html: string): string | null {
+  const lines = toLines(html);
+  return cap(
+    sliceItem(
+      lines,
+      "2",
+      "management.{0,3}s\\s*discussion.{0,90}",
+      "3",
+      "quantitative.{0,90}"
+    ),
+    QUARTERLY_MDNA_CHARS
+  );
+}
 
 export function extractSections(html: string): Pick<TenK, "business" | "mdna"> {
   const lines = toLines(html);
