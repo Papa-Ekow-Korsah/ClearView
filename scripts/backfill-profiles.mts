@@ -20,11 +20,17 @@ for (const line of readFileSync(".env.local", "utf8").split(/\r?\n/)) {
 
 const { getLatestTenK } = await import("@/lib/tenk");
 const { buildCompanyProfile } = await import("@/lib/company-profile");
-const { getCompanyProfile, saveCompanyProfile } = await import("@/lib/db/queries");
+const { getCompanyProfile, saveCompanyProfile, listAnalyses } = await import("@/lib/db/queries");
+const { PROFILE_FORMAT_VERSION } = await import("@/types/company-profile");
 
-const tickers = process.argv.slice(2).map((t) => t.toUpperCase());
+const args = process.argv.slice(2);
+// --force rebuilds even when the cached profile matches the current filing —
+// for when the prompt or verification improves and existing profiles should
+// benefit.
+const force = args.includes("--force");
+const tickers = args.filter((a) => !a.startsWith("--")).map((t) => t.toUpperCase());
 if (tickers.length === 0) {
-  console.error("usage: npm run profiles -- TICKER [TICKER...]");
+  console.error("usage: npm run profiles -- [--force] TICKER [TICKER...]");
   process.exit(1);
 }
 
@@ -44,20 +50,34 @@ for (const ticker of tickers) {
   const tenK = result.tenK;
 
   const cached = await getCompanyProfile(ticker);
-  if (cached && cached.accession === tenK.accession) {
+  if (
+    !force &&
+    cached &&
+    cached.accession === tenK.accession &&
+    cached.profile.formatVersion >= PROFILE_FORMAT_VERSION
+  ) {
     console.log(`already current (10-K ${tenK.filedDate})`);
     skipped++;
     continue;
   }
 
+  // The page reads "Derived from Apple Inc's Form 10-K", so use the name the
+  // analyses already carry rather than the bare ticker.
+  const [latest] = await listAnalyses(ticker);
+  const name = latest?.companyName ?? ticker;
+
+  const rejected: string[] = [];
   try {
     const started = Date.now();
-    const profile = await buildCompanyProfile(ticker, ticker, tenK);
+    const profile = await buildCompanyProfile(ticker, name, tenK, {
+      onSegmentReject: (segment, reason) => rejected.push(`${segment}: ${reason}`),
+    });
     await saveCompanyProfile(ticker, tenK.accession, profile);
     const verified = profile.sections.reduce((n, s) => n + s.claims.length, 0);
     console.log(
-      `built in ${((Date.now() - started) / 1000).toFixed(0)}s — ${verified} verified, ${profile.discardedClaims} discarded (10-K ${tenK.filedDate})`
+      `built in ${((Date.now() - started) / 1000).toFixed(0)}s — ${verified} claims, ${profile.valueChain?.length ?? 0} flow steps, ${profile.segments?.length ?? 0} segments, ${profile.discardedClaims} discarded`
     );
+    for (const r of rejected) console.log(`         segment dropped — ${r}`);
     built++;
   } catch (err) {
     console.log(`FAILED — ${err instanceof Error ? err.message : err}`);

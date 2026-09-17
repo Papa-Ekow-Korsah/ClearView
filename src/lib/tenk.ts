@@ -125,12 +125,16 @@ function startsFor(lines: string[], num: string, title: string): number[] {
 /**
  * Text between one item heading and the next.
  *
- * Taken from the FIRST qualifying heading forwards. Contents rows are already
- * excluded by the patterns above, so the earliest real heading is where the
- * section begins — and working backwards actively breaks filings that repeat
- * the item number partway through. Microsoft's 10-K labels its closing
- * "Available Information" block "Item 1" again, and searching from the end
- * returned that tail instead of the business description.
+ * A section ends at the very next end heading — never a later one — and a
+ * candidate only counts if what lies between is substantial. That one rule
+ * handles both shapes that broke simpler versions:
+ *  - HP's table of contents lists "Item 7. Management's Discussion…" in full
+ *    on one line, two lines above "Item 8". Its section is two lines long, so
+ *    it's rejected. (Skipping to a later end instead swallowed Items 1–6.)
+ *  - Microsoft repeats "Item 1" before its closing "Available Information"
+ *    block. The first heading's next end is Item 1A, so the whole section is
+ *    taken with the repeat inside it. (Searching from the end returned only
+ *    that tail.)
  */
 export function sliceItem(
   lines: string[],
@@ -143,8 +147,8 @@ export function sliceItem(
   const starts = startsFor(lines, startNum, startTitle);
   const ends = startsFor(lines, endNum, endTitle);
   for (const start of starts) {
-    const end = ends.find((e) => e > start + minLines);
-    if (end !== undefined) return lines.slice(start, end).join("\n");
+    const end = ends.find((e) => e > start);
+    if (end !== undefined && end - start > minLines) return lines.slice(start, end).join("\n");
   }
   return null;
 }
@@ -169,9 +173,12 @@ export function extractSections(html: string): Pick<TenK, "business" | "mdna"> {
       sliceItem(
         lines,
         "7",
-        "management.{0,3}s\\s*discussion(?:\\s*and\\s*analysis)?(?:\\s*of\\s*financial\\s*condition)?(?:\\s*and\\s*results\\s*of\\s*operations)?",
+        // Any ending is accepted after the distinctive words: Bloom Energy's
+        // heading breaks off at "…AND RESULTS OF", with OPERATIONS on the
+        // next line, and a full-title pattern rejects it.
+        "management.{0,3}s\\s*discussion.{0,90}",
         "8",
-        "financial\\s*statements(?:\\s*and\\s*supplementary\\s*data)?"
+        "financial\\s*statements.{0,60}"
       ),
       MDNA_CHARS
     ),
@@ -195,8 +202,24 @@ export type TenKResult =
   | { ok: true; tenK: TenK }
   | { ok: false; reason: TenKFailure };
 
-/** The company's most recent annual report, or why there isn't one to read. */
-export async function getLatestTenK(ticker: string): Promise<TenKResult> {
+/** Which 10-K is current, without downloading it. */
+export interface TenKRef {
+  url: string;
+  accession: string;
+  filedDate: string;
+}
+
+export type TenKRefResult = { ok: true; ref: TenKRef } | { ok: false; reason: TenKFailure };
+
+/**
+ * Identify the latest 10-K from SEC's small submissions index alone.
+ *
+ * Deciding whether a cached profile is still current needs only the accession
+ * number. Fetching the filing itself — several megabytes — just to compare
+ * that number made every cached page load wait on a full annual-report
+ * download.
+ */
+export async function getLatestTenKRef(ticker: string): Promise<TenKRefResult> {
   let cik: string | null;
   try {
     cik = await getCik(ticker);
@@ -225,25 +248,35 @@ export async function getLatestTenK(ticker: string): Promise<TenKResult> {
     const primary = recent.primaryDocument?.[idx] ?? "";
     if (!accessionRaw || !primary) return { ok: false, reason: "unparsable" };
 
-    const accession = accessionRaw.replace(/-/g, "");
-    const url = `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${accession}/${primary}`;
-    const docRes = await secFetch(url);
-    if (!docRes.ok) return { ok: false, reason: "unreachable" };
-
-    const { business, mdna } = extractSections(await docRes.text());
-    if (!business && !mdna) return { ok: false, reason: "unparsable" };
-
+    const folder = accessionRaw.replace(/-/g, "");
     return {
       ok: true,
-      tenK: {
-        url,
+      ref: {
+        url: `https://www.sec.gov/Archives/edgar/data/${Number(cik)}/${folder}/${primary}`,
         accession: accessionRaw,
         filedDate: recent.filingDate?.[idx] ?? "",
-        business,
-        mdna,
       },
     };
   } catch {
     return { ok: false, reason: "unreachable" };
   }
+}
+
+/** Download a 10-K identified by `getLatestTenKRef` and extract its sections. */
+export async function fetchTenK(ref: TenKRef): Promise<TenKResult> {
+  try {
+    const docRes = await secFetch(ref.url);
+    if (!docRes.ok) return { ok: false, reason: "unreachable" };
+    const { business, mdna } = extractSections(await docRes.text());
+    if (!business && !mdna) return { ok: false, reason: "unparsable" };
+    return { ok: true, tenK: { ...ref, business, mdna } };
+  } catch {
+    return { ok: false, reason: "unreachable" };
+  }
+}
+
+/** The company's most recent annual report, or why there isn't one to read. */
+export async function getLatestTenK(ticker: string): Promise<TenKResult> {
+  const found = await getLatestTenKRef(ticker);
+  return found.ok ? fetchTenK(found.ref) : found;
 }

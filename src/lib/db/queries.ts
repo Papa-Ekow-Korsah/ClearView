@@ -75,9 +75,11 @@ export async function getCompanyProfile(ticker: string) {
 }
 
 /**
- * Store a profile. Conflicts are ignored rather than overwritten: two callers
- * racing on the same filing produce equivalent profiles, and the first one
- * home is as good as the second.
+ * Store a profile, replacing any earlier one built from the same filing.
+ *
+ * Overwrite rather than ignore: a profile is rebuilt for an unchanged filing
+ * when its format is upgraded (v1 had no diagram data), and ignoring the
+ * conflict would silently keep serving the old one forever.
  */
 export async function saveCompanyProfile(
   ticker: string,
@@ -87,5 +89,8 @@ export async function saveCompanyProfile(
   await db()
     .insert(companyProfiles)
     .values({ ticker: ticker.toUpperCase(), accession, profile })
-    .onConflictDoNothing();
+    .onConflictDoUpdate({
+      target: [companyProfiles.ticker, companyProfiles.accession],
+      set: { profile, createdAt: new Date() },
+    });
 }

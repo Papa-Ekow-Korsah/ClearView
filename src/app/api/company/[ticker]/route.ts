@@ -3,8 +3,9 @@ import { validateTicker } from "@/lib/ticker";
 import { checkRateLimit, ANALYZE_LIMIT } from "@/lib/rate-limit";
 import { getCompanyProfile, saveCompanyProfile } from "@/lib/db/queries";
 import { buildCompanyProfile } from "@/lib/company-profile";
-import { getLatestTenK } from "@/lib/tenk";
+import { fetchTenK, getLatestTenKRef } from "@/lib/tenk";
 import { AnalysisGenerationError } from "@/lib/anthropic";
+import { PROFILE_FORMAT_VERSION } from "@/types/company-profile";
 
 /**
  * The company profile — what the business is, read out of its 10-K.
@@ -27,18 +28,28 @@ export async function GET(
   }
   const ticker = validation.ticker;
 
-  // Which 10-K is current? This is the cache key, and it's cheap — SEC
-  // metadata, no model involved.
-  const result = await getLatestTenK(ticker).catch(
+  // Which 10-K is current? Only the filings index is read here — the filing
+  // itself is downloaded further down, and only when a rebuild is needed.
+  const found = await getLatestTenKRef(ticker).catch(
     () => ({ ok: false, reason: "unreachable" }) as const
   );
 
   // A cached profile is still worth serving when SEC is unreachable: it was
   // built from a real filing and is only at risk of being a year out of date.
   const cached = await getCompanyProfile(ticker);
-  if (cached && (!result.ok || cached.accession === result.tenK.accession)) {
+  const current =
+    cached !== null &&
+    found.ok &&
+    cached.accession === found.ref.accession &&
+    cached.profile.formatVersion >= PROFILE_FORMAT_VERSION;
+  // An older-format profile is still served when SEC can't be reached; when it
+  // can, it's rebuilt so the reader gets the diagrams too.
+  if (cached && (current || !found.ok)) {
     return NextResponse.json({ profile: cached.profile, cached: true });
   }
+
+  // Past this point a rebuild is needed, so fetch the filing itself.
+  const result = found.ok ? await fetchTenK(found.ref) : found;
 
   if (!result.ok) {
     // Three different statements. Saying "this company files no annual report"
